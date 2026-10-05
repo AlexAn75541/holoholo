@@ -49,7 +49,6 @@ To receive automatic game updates on your Android phone:
    ```
 4. Configure options:
    - **Filter regular expression**: `.*\.apk$` (downloads the standalone APK; recommended) or `.*\.xapk$` (if using an XAPK installer).
-   - **Include prereleases**: Enable this setting in Obtainium to see beta builds.
    - **Version detection**: GitHub Releases tags track patch builds, but Android installation still uses the game's internal version code. Same-game-version beta builds may need manual reinstall; this has not been tested on a device.
 5. Tap **Add**, then tap **Install**.
 
@@ -65,7 +64,7 @@ To receive automatic game updates on your Android phone:
 
 ## Patch Versions
 
-Release tags use `0.1-beta`, then `0.1.1-beta`, `0.1.2-beta`, etc. These identify **patch builds**, not game versions. The original game version stays inside the APK and is shown in each release. Builds remain beta until a user verifies installation and gameplay and explicitly requests `1.0`. Only the newest patch release is retained after publication. Older beta tags remain as revision-counter markers; the legacy `v1.2.1-patched` release and tag are removed after the first beta succeeds.
+Release tags use `0.1-beta`, then `0.1.1-beta`, `0.1.2-beta`, etc. These identify **patch builds**, not game versions. GitHub marks them as normal releases so Obtainium can discover them without enabling prereleases; the `-beta` tag still means device installation and gameplay are unverified. The original game version stays inside the APK. Tags remain beta until a user verifies installation and gameplay and explicitly requests `1.0`. Only the newest patch release is retained after publication. Older beta tags remain as revision-counter markers; the legacy `v1.2.1-patched` release and tag are removed after the first beta succeeds.
 
 ## Manual Workflow Trigger
 

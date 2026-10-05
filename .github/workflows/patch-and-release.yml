@@ -95,13 +95,13 @@ jobs:
         if: steps.version.outputs.skip != 'true'
         run: python3 scripts/verify_apk.py dist
 
-      - name: Publish beta release
+      - name: Publish release
         if: steps.version.outputs.skip != 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.patch.outputs.tag_name }}
           name: ${{ steps.patch.outputs.release_title }}
-          prerelease: true
+          prerelease: false
           fail_on_unmatched_files: true
           files: |
             ${{ steps.patch.outputs.standalone_apk }}
