@@ -129,7 +129,7 @@ If the app does not show up in the Game Dashboard list:
 
 1. Force Android Game Mode performance profile:
    ```bash
-   adb shell cmd game set --mode 2 game.qualiarts.hololive.dreams.com
+   adb shell cmd game set --fps 120 --mode 2 game.qualiarts.hololive.dreams.com
    ```
 2. Force display refresh rate to 120 Hz:
    ```bash
