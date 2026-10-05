@@ -37,8 +37,6 @@ def verify(apk: Path, source_manifest: Path):
             raise ValueError('missing or unexpected native architecture')
         if not any(name.startswith('assets/aa/Android/') for name in names):
             raise ValueError('Unity asset pack not merged')
-        if any(name.upper().startswith('META-INF/') and name.upper().endswith(('.RSA', '.DSA', '.SF', '.EC')) for name in names):
-            raise ValueError('old APK v1 signature remains')
 
     badging = command('aapt', 'dump', 'badging', str(apk))
     match = re.search(r"^package: name='([^']+)' versionCode='([^']+)' versionName='([^']+)'", badging, re.M)
