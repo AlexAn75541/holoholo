@@ -2,7 +2,7 @@
 
 [![Update & Release](https://github.com/AlexAn75541/holoholo/actions/workflows/patch-and-release.yml/badge.svg)](https://github.com/AlexAn75541/holoholo/actions/workflows/patch-and-release.yml)
 
-Automated GitHub Actions pipeline that fetches the latest release of **hololive Dreams** (`game.qualiarts.hololive.dreams.com`) from APKPure, removes the Google Play licensing/installer lock (PairIP), signs the binaries with a permanent key, and publishes ready-to-install releases for auto-updating via **Obtainium**.
+Experimental GitHub Actions pipeline for **hololive Dreams** (`game.qualiarts.hololive.dreams.com`). It fetches an APKPure XAPK, patches the installer/licensing check, signs the output, and publishes beta builds. Device installation and gameplay are **not yet verified**; use at your own risk.
 
 ---
 
@@ -30,10 +30,10 @@ This repository automates the entire patching and packaging pipeline via GitHub 
    - `isLocalCheckPassed` -> returns `true`.
    - `checkLicense` -> returns early (`return-void`).
    - `attachBaseContext` -> nops out the `checkLicense` call.
-2. **Standalone Merged APK**: Merges split APK components (`config.arm64_v8a.apk` and `UnityDataAssetPack.apk`) into a single universal APK. No split-installer needed.
+2. **Standalone arm64 APK**: Merges `config.arm64_v8a.apk` and `UnityDataAssetPack.apk` into the base APK. It is not universal; it targets arm64 devices.
 3. **Repacked XAPK**: Also builds a signed, repacked `.xapk` containing all split APKs and original manifest for users preferring XAPK installers.
-4. **Permanent Keystore Signing**: All releases are signed with a persistent repository keystore. Android allows seamless in-place updates without uninstalling or wiping user data.
-5. **Scheduled Checks**: Checks APKPure daily at 04:00 UTC. When a new game version drops, it builds and releases the update automatically.
+4. **Consistent signing**: Beta builds share one repository signing key. The upstream package version and version code remain unchanged inside the APK. Android/Obtainium may not offer an in-place update between patch-only revisions with the same version code.
+5. **Builds**: Commits to `main` and manual runs produce a patch build. A daily check at 04:00 UTC builds only when APKPure's game version code changes. Older patch releases are pruned after a successful replacement.
 
 ---
 
@@ -49,7 +49,8 @@ To receive automatic game updates on your Android phone:
    ```
 4. Configure options:
    - **Filter regular expression**: `.*\.apk$` (downloads the standalone APK; recommended) or `.*\.xapk$` (if using an XAPK installer).
-   - **Version detection**: Default (GitHub Releases).
+   - **Include prereleases**: Enable this setting in Obtainium to see beta builds.
+   - **Version detection**: GitHub Releases tags track patch builds, but Android installation still uses the game's internal version code. Same-game-version beta builds may need manual reinstall; this has not been tested on a device.
 5. Tap **Add**, then tap **Install**.
 
 ---
@@ -58,9 +59,13 @@ To receive automatic game updates on your Android phone:
 
 - If you currently have the official, unpatched game installed, **uninstall it first**.
 - Android requires all updates to match the signature of the currently installed app. Because the official game is signed by Qualiarts and this patched release is signed by this repository's key, an existing installation signed with a different key cannot be updated in-place on the first install.
-- **All future updates from this repository share the same key and update seamlessly without losing data.**
+- Later builds use the same signing key, but in-place installation and data preservation are not yet verified. Back up game data before trying a replacement.
 
 ---
+
+## Patch Versions
+
+Release tags use `0.1-beta`, then `0.1.1-beta`, `0.1.2-beta`, etc. These identify **patch builds**, not game versions. The original game version stays inside the APK and is shown in each release. Builds remain beta until a user verifies installation and gameplay and explicitly requests `1.0`. Only the newest patch release is retained after publication. Older beta tags remain as revision-counter markers; the legacy `v1.2.1-patched` release and tag are removed after the first beta succeeds.
 
 ## Manual Workflow Trigger
 

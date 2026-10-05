@@ -420,6 +420,7 @@ def main():
     parser.add_argument("--keystore-pass", default="holoholo", help="Keystore password")
     parser.add_argument("--keystore-alias", default="release", help="Keystore key alias")
     parser.add_argument("--dist-dir", default="dist", help="Output directory")
+    parser.add_argument("--patch-version", required=True, help="Release version, e.g. 0.1-beta")
     args = parser.parse_args()
 
     os.makedirs(args.dist_dir, exist_ok=True)
@@ -512,7 +513,9 @@ def main():
     merge_split_apks(patched_base_apk, split_apk_paths, merged_apk_unsigned)
 
     # Cosmetic names
-    cosmetic_base = f"hololive-dreams-{version_name}-patched"
+    if not re.fullmatch(r"0\.1(?:\.[1-9][0-9]*)?-beta", args.patch_version):
+        raise ValueError("Patch version must be 0.1-beta or 0.1.X-beta (X >= 1)")
+    cosmetic_base = f"hololive-dreams-{version_name}-{args.patch_version}"
     output_standalone_apk = os.path.join(args.dist_dir, f"{cosmetic_base}.apk")
     output_xapk = os.path.join(args.dist_dir, f"{cosmetic_base}.xapk")
 
@@ -570,8 +573,8 @@ def main():
             f.write(f"package_name={package_name}\n")
             f.write(f"version_name={version_name}\n")
             f.write(f"version_code={version_code}\n")
-            f.write(f"tag_name=v{version_name}-patched\n")
-            f.write(f"release_title=hololive Dreams v{version_name}-patched\n")
+            f.write(f"tag_name={args.patch_version}\n")
+            f.write(f"release_title=hololive Dreams patch {args.patch_version} (game {version_name})\n")
             f.write(f"standalone_apk={output_standalone_apk}\n")
             f.write(f"repacked_xapk={output_xapk}\n")
 

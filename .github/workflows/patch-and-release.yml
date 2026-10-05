@@ -4,161 +4,127 @@ on:
   workflow_dispatch:
     inputs:
       xapk_url:
-        description: 'Optional custom XAPK Download URL (leave blank for automatic APKPure CDN)'
+        description: 'Optional direct XAPK URL (blank uses APKPure)'
         required: false
         default: ''
-      force_release:
-        description: 'Force release even if tag already exists'
-        type: boolean
-        default: false
   schedule:
-    # Run once daily at 04:00 UTC to automatically check for game updates
     - cron: '0 4 * * *'
   push:
-    branches:
-      - main
-    paths:
-      - 'input/**'
+    branches: [main]
 
 permissions:
   contents: write
 
+concurrency:
+  group: patch-release
+  cancel-in-progress: false
+
 jobs:
   patch-and-release:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
 
-      - name: Set up Java
-        uses: actions/setup-java@v4
+      - uses: actions/setup-java@v4
         with:
-          distribution: 'temurin'
+          distribution: temurin
           java-version: '17'
 
-      - name: Locate Android Build-Tools (zipalign & apksigner)
-        id: build-tools
+      - name: Locate Android build tools
         run: |
-          if [ -d "$ANDROID_HOME/build-tools" ]; then
-            BT_DIR=$(ls -d $ANDROID_HOME/build-tools/* | sort -V | tail -n 1)
-            echo "Found Android build-tools at $BT_DIR"
-            echo "$BT_DIR" >> $GITHUB_PATH
-          else
-            echo "Warning: ANDROID_HOME/build-tools not found"
-          fi
+          BT_DIR=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)
+          test -x "$BT_DIR/zipalign"
+          test -x "$BT_DIR/apksigner"
+          echo "$BT_DIR" >> "$GITHUB_PATH"
 
-      - name: Check version against existing releases
-        id: check-version
+      - name: Select patch version
+        id: version
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          GH_TOKEN: ${{ github.token }}
         run: |
-          FORCE="${{ github.event.inputs.force_release || 'false' }}"
-          CUSTOM_URL="${{ github.event.inputs.xapk_url || '' }}"
+          python3 - <<'PY'
+          import json, os, re, subprocess
+          from scripts.patcher import get_apkpure_download_info
 
-          python3 -c "
-          import urllib.request, json, subprocess, sys, os
+          releases = json.loads(subprocess.check_output(
+              ['gh', 'release', 'list', '--json', 'tagName', '--limit', '100'], text=True))
+          release_tags = [r['tagName'] for r in releases]
+          tags = subprocess.check_output(['git', 'tag', '--list'], text=True).splitlines()
+          version = '0.1-beta' if '0.1-beta' not in tags else (
+              f"0.1.{max([0] + [int(m.group(1)) for t in tags if (m := re.fullmatch(r'0\.1\.(\d+)-beta', t))]) + 1}-beta")
 
-          force = '$FORCE'.lower() == 'true'
-          custom_url = '$CUSTOM_URL'.strip()
+          if os.environ['EVENT_NAME'] == 'schedule':
+              _, game_version, game_code = get_apkpure_download_info()
+              latest_tag = next((t for t in release_tags if re.fullmatch(r'0\.1(?:\.[1-9][0-9]*)?-beta', t)), None)
+              latest_body = subprocess.check_output(
+                  ['gh', 'release', 'view', latest_tag, '--json', 'body', '--jq', '.body'], text=True) if latest_tag else ''
+              if f'Game version code: `{game_code}`' in latest_body:
+                  print('No upstream game update; skipping scheduled build.')
+                  with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+                      f.write('skip=true\n')
+                  raise SystemExit(0)
 
-          if force:
-              print('Force release requested. Proceeding.')
-              with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
-                  f.write('skip=false\n')
-              sys.exit(0)
-
-          if os.path.isdir('input') and any(f.endswith(('.xapk', '.zip')) for f in os.listdir('input')):
-              print('Found manual file in input/ directory. Proceeding.')
-              with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
-                  f.write('skip=false\n')
-              sys.exit(0)
-
-          if not custom_url:
-              try:
-                  api_url = 'https://tapi.pureapk.com/v3/get_app_his_version?package_name=game.qualiarts.hololive.dreams.com&hl=en'
-                  headers = {
-                      'Ual-Access-Businessid': 'projecta',
-                      'Ual-Access-ProjectA': '{\"device_info\":{\"os_ver\":\"34\"}}',
-                      'User-Agent': 'Mozilla/5.0'
-                  }
-                  req = urllib.request.Request(api_url, headers=headers)
-                  with urllib.request.urlopen(req) as resp:
-                      data = json.loads(resp.read().decode('utf-8'))
-                  ver = data['version_list'][0]['version_name']
-                  tag = f'v{ver}-patched'
-                  print(f'Latest APKPure version: {ver} (Tag: {tag})')
-                  tags = subprocess.check_output(['git', 'tag', '-l', tag], text=True).strip()
-                  if tags:
-                      print(f'Tag {tag} already released. Skipping.')
-                      with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
-                          f.write('skip=true\n')
-                      sys.exit(0)
-              except Exception as e:
-                  print(f'Version check warning: {e}')
-
+          print(f'Patch release: {version}')
           with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+              f.write(f'patch_version={version}\n')
               f.write('skip=false\n')
-          "
+          PY
 
-      - name: Run Hololive Dreams Patcher
-        if: steps.check-version.outputs.skip != 'true'
+      - name: Build signed artifacts
+        if: steps.version.outputs.skip != 'true'
         id: patch
+        env:
+          XAPK_URL: ${{ inputs.xapk_url }}
+          PATCH_VERSION: ${{ steps.version.outputs.patch_version }}
         run: |
-          CUSTOM_URL="${{ github.event.inputs.xapk_url || '' }}"
-          ARGS=""
-          if [ -n "$CUSTOM_URL" ]; then
-            ARGS="--input $CUSTOM_URL"
-          fi
-
-          python3 scripts/patcher.py \
-            $ARGS \
+          args=()
+          if [ -n "$XAPK_URL" ]; then args+=(--input "$XAPK_URL"); fi
+          python3 scripts/patcher.py "${args[@]}" \
+            --patch-version "$PATCH_VERSION" \
             --keystore keystore/release.p12 \
-            --keystore-pass holoholo \
-            --keystore-alias release \
             --dist-dir dist
 
-      - name: Verify Android 16+ Installation Compliance
-        if: steps.check-version.outputs.skip != 'true'
-        run: |
-          python3 scripts/verify_apk.py dist
+      - name: Verify APK and XAPK artifacts
+        if: steps.version.outputs.skip != 'true'
+        run: python3 scripts/verify_apk.py dist
 
-      - name: Publish GitHub Release
-        if: steps.check-version.outputs.skip != 'true'
+      - name: Publish beta release
+        if: steps.version.outputs.skip != 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.patch.outputs.tag_name }}
           name: ${{ steps.patch.outputs.release_title }}
-          draft: false
-          prerelease: false
+          prerelease: true
+          fail_on_unmatched_files: true
           files: |
             ${{ steps.patch.outputs.standalone_apk }}
             ${{ steps.patch.outputs.repacked_xapk }}
           body: |
-            ### hololive Dreams ${{ steps.patch.outputs.version_name }} (Patched)
+            Patch build `${{ steps.patch.outputs.tag_name }}` (beta, device install and gameplay not yet verified).
+            Game version: `${{ steps.patch.outputs.version_name }}`. Game version code: `${{ steps.patch.outputs.version_code }}`.
+            APK package version remains the upstream value; a new patch tag alone does not guarantee Android detects an in-place update.
+            Use the `.apk` asset with Obtainium's APK-only filter. The `.xapk` requires a split-capable installer.
+            Local artifact checks do not prove an Android 16 device install or successful gameplay.
 
-            Automated build for **game.qualiarts.hololive.dreams.com** (Version code: `${{ steps.patch.outputs.version_code }}`).
-
-            #### Applied Patches & Fixes
-            - **Google Play Installer & Licensing Bypass**: Patched PairIP check in `classes.dex` (`performLocalInstallerCheck`, `isLocalCheckPassed`, `checkLicense`, and `attachBaseContext`). Sideloaded installs will no longer display the Google Play error screen.
-            - **Android 16+ Split Incompatibility Fix**: Neutralized `requiredSplitTypes='base__abi'` and `com.android.vending.splits.required` in `AndroidManifest.xml` so Android PackageInstaller can install the standalone APK without `failureIncompatible`.
-            - **16KB Page Alignment**: Native libraries (`.so`) are 16KB aligned for compatibility with Android 15/16 memory architectures.
-            - **Permanent Key Signing**: All files are signed with the permanent repository release key (Signature schemes v2 & v3).
-
-            #### Available Downloads
-            1. **`hololive-dreams-${{ steps.patch.outputs.version_name }}-patched.apk`**
-               - Standalone Universal APK (merged base + arm64_v8a native libs + asset pack).
-               - **Recommended**: In Obtainium, set filter regex to `.*\.apk$` to download and install this file.
-            2. **`hololive-dreams-${{ steps.patch.outputs.version_name }}-patched.xapk`**
-               - Signed XAPK containing all split APKs and original manifest.
-
-            #### Installation Notice
-            - **First-time Install**: If you currently have the official unpatched game installed, uninstall it first because the signing certificate is changed from Qualiarts's private key to this repo's key.
-            - **Subsequent Updates**: Future releases from this repo use the exact same key and can be updated seamlessly via Obtainium without uninstalling or wiping data.
+      - name: Prune superseded releases
+        if: steps.version.outputs.skip != 'true'
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+          CURRENT_TAG: ${{ steps.patch.outputs.tag_name }}
+        run: |
+          gh release list --json tagName --limit 100 --jq '.[].tagName' | while IFS= read -r tag; do
+            if [ "$tag" != "$CURRENT_TAG" ]; then
+              if [[ "$tag" == "v1.2.1-patched" ]]; then
+                gh release delete "$tag" --cleanup-tag --yes
+              elif [[ "$tag" =~ ^0\.1(\.[1-9][0-9]*)?-beta$ ]]; then
+                gh release delete "$tag" --yes
+              fi
+            fi
+          done
