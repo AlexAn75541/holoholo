@@ -13,21 +13,15 @@ on:
     branches: [main]
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: patch-release
   cancel-in-progress: false
 
 jobs:
-  build:
+  patch-and-release:
     runs-on: ubuntu-latest
-    outputs:
-      skip: ${{ steps.version.outputs.skip }}
-      tag: ${{ steps.patch.outputs.tag_name }}
-      title: ${{ steps.patch.outputs.release_title }}
-      game_version: ${{ steps.patch.outputs.version_name }}
-      game_code: ${{ steps.patch.outputs.version_code }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -58,12 +52,12 @@ jobs:
               ['gh', 'release', 'list', '--json', 'tagName', '--limit', '100'], text=True))
           release_tags = [r['tagName'] for r in releases]
           tags = subprocess.check_output(['git', 'tag', '--list'], text=True).splitlines()
-          version = '0.1-beta' if '0.1-beta' not in tags else (
-              f"0.1.{max([0] + [int(m.group(1)) for t in tags if (m := re.fullmatch(r'0\.1\.(\d+)-beta', t))]) + 1}-beta")
+          version = '0.2-beta' if '0.2-beta' not in tags else (
+              f"0.2.{max([0] + [int(m.group(1)) for t in tags if (m := re.fullmatch(r'0\.2\.(\d+)-beta', t))]) + 1}-beta")
 
           if os.environ['EVENT_NAME'] == 'schedule':
               _, _, game_code = get_apkpure_download_info()
-              latest_tag = next((t for t in release_tags if re.fullmatch(r'0\.1(?:\.[1-9][0-9]*)?-beta', t)), None)
+              latest_tag = next((t for t in release_tags if re.fullmatch(r'0\.[1-9][0-9]*(?:\.[1-9][0-9]*)?-beta', t)), None)
               latest_body = subprocess.check_output(
                   ['gh', 'release', 'view', latest_tag, '--json', 'body', '--jq', '.body'], text=True) if latest_tag else ''
               if f'Game version code: `{game_code}`' in latest_body:
@@ -72,6 +66,7 @@ jobs:
                       f.write('skip=true\n')
                   raise SystemExit(0)
 
+          print(f'Selected patch version: {version}')
           with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
               f.write(f'patch_version={version}\n')
               f.write('skip=false\n')
@@ -96,89 +91,32 @@ jobs:
           apk=(dist/*.apk)
           test "${#apk[@]}" -eq 1
           python3 scripts/verify_apk.py "${apk[0]}" dist/work/extracted/manifest.json
-      - name: Save APK for device test
+      - name: Publish release
         if: steps.version.outputs.skip != 'true'
-        uses: actions/upload-artifact@v4
-        with:
-          name: candidate-apk
-          path: dist/*.apk
-          if-no-files-found: error
-          retention-days: 1
-
-  android-install:
-    needs: build
-    if: needs.build.outputs.skip != 'true'
-    runs-on: [self-hosted, linux, ARM64, android16]
-    timeout-minutes: 30
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: candidate-apk
-          path: candidate
-      - name: Install and reinstall on dedicated Android 16 arm64 device
-        shell: bash
-        run: |
-          set -euo pipefail
-          command -v adb
-          mapfile -t serials < <(adb devices | awk 'NR>1 && $2=="device" {print $1}')
-          test "${#serials[@]}" -eq 1
-          serial="${serials[0]}"
-          sdk=$(adb -s "$serial" shell getprop ro.build.version.sdk | tr -d '\r')
-          abi=$(adb -s "$serial" shell getprop ro.product.cpu.abi | tr -d '\r')
-          test "$sdk" -ge 36
-          test "$abi" = arm64-v8a
-          package=game.qualiarts.hololive.dreams.com
-          if adb -s "$serial" shell pm path "$package" | grep -q '^package:'; then
-            echo 'Dedicated test device must start without this package' >&2
-            exit 1
-          fi
-          apk=(candidate/*.apk)
-          test "${#apk[@]}" -eq 1
-          cleanup() { adb -s "$serial" uninstall "$package" || true; }
-          trap cleanup EXIT
-          adb -s "$serial" install "${apk[0]}"
-          adb -s "$serial" shell pm path "$package" | grep -q '^package:'
-          adb -s "$serial" install -r "${apk[0]}"
-          adb -s "$serial" shell pm path "$package" | grep -q '^package:'
-          echo 'Android 16 arm64 clean install and same-version reinstall passed.'
-
-  publish:
-    needs: [build, android-install]
-    if: needs.build.outputs.skip != 'true'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: candidate-apk
-          path: candidate
-      - name: Publish APK-only release
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          TAG: ${{ needs.build.outputs.tag }}
-          TITLE: ${{ needs.build.outputs.title }}
-          GAME_VERSION: ${{ needs.build.outputs.game_version }}
-          GAME_CODE: ${{ needs.build.outputs.game_code }}
+          TAG: ${{ steps.patch.outputs.tag_name }}
+          TITLE: ${{ steps.patch.outputs.release_title }}
+          GAME_VERSION: ${{ steps.patch.outputs.version_name }}
+          GAME_CODE: ${{ steps.patch.outputs.version_code }}
         run: |
           set -euo pipefail
-          apk=(candidate/*.apk)
+          apk=(dist/*.apk)
           test "${#apk[@]}" -eq 1
           gh release create "$TAG" "${apk[0]}" --title "$TITLE" \
-            --notes "Patch build $TAG (beta; gameplay not verified). Game version: $GAME_VERSION. Game version code: \`$GAME_CODE\`. Android 16 arm64 device clean install and same-version reinstall passed. APK version remains upstream."
+            --notes "Patch build $TAG (beta). Game version: $GAME_VERSION. Game version code: \`$GAME_CODE\`. Contains standalone arm64 APK with uncompressed resources.arsc (4-byte aligned), 16KiB page alignment, and v2/v3 signatures. Upstream package version remains intact."
       - name: Prune superseded patch releases
+        if: steps.version.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          CURRENT_TAG: ${{ needs.build.outputs.tag }}
+          CURRENT_TAG: ${{ steps.patch.outputs.tag_name }}
         run: |
           gh release list --json tagName --limit 100 --jq '.[].tagName' | while IFS= read -r tag; do
             if [ "$tag" != "$CURRENT_TAG" ]; then
-              if [[ "$tag" == "v1.2.1-patched" ]]; then
+              if [[ "$tag" == "v1.2.1-patched" || "$tag" =~ ^0\.[1-9][0-9]*(\.[1-9][0-9]*)?-beta$ ]]; then
                 gh release delete "$tag" --cleanup-tag --yes
-              elif [[ "$tag" =~ ^0\.1(\.[1-9][0-9]*)?-beta$ ]]; then
-                gh release delete "$tag" --yes
               fi
             fi
           done

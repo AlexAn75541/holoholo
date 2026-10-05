@@ -501,8 +501,8 @@ def main():
     merge_split_apks(patched_base_apk, split_apk_paths, merged_apk_unsigned)
 
     # Cosmetic names
-    if not re.fullmatch(r"0\.1(?:\.[1-9][0-9]*)?-beta", args.patch_version):
-        raise ValueError("Patch version must be 0.1-beta or 0.1.X-beta (X >= 1)")
+    if not re.fullmatch(r"0\.[1-9][0-9]*(?:\.[1-9][0-9]*)?-beta", args.patch_version):
+        raise ValueError("Patch version must be 0.X-beta or 0.X.Y-beta (e.g. 0.2-beta, 0.2.1-beta)")
     cosmetic_base = f"hololive-dreams-{version_name}-{args.patch_version}"
     output_standalone_apk = os.path.join(args.dist_dir, f"{cosmetic_base}.apk")
 
