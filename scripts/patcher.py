@@ -19,8 +19,43 @@ import subprocess
 import urllib.request
 from typing import Dict, List, Tuple, Optional
 
-DEFAULT_XAPK_URL = "https://d.apkpure.com/b/XAPK/game.qualiarts.hololive.dreams.com?version=latest"
+DEFAULT_PACKAGE = "game.qualiarts.hololive.dreams.com"
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+
+
+def get_apkpure_download_info(package_name: str = DEFAULT_PACKAGE) -> Tuple[str, str, str]:
+    """
+    Queries APKPure mobile API (same as Obtainium) to fetch direct CDN download URL and metadata.
+    Returns (download_url, version_name, version_code).
+    """
+    api_url = f"https://tapi.pureapk.com/v3/get_app_his_version?package_name={package_name}&hl=en"
+    headers = {
+        "Ual-Access-Businessid": "projecta",
+        "Ual-Access-ProjectA": '{"device_info":{"os_ver":"34"}}',
+        "User-Agent": USER_AGENT,
+    }
+    req = urllib.request.Request(api_url, headers=headers)
+    with urllib.request.urlopen(req) as resp:
+        data = json.loads(resp.read().decode("utf-8"))
+
+    version_list = data.get("version_list", [])
+    if not version_list:
+        raise RuntimeError(f"No versions found for package: {package_name}")
+
+    latest = version_list[0]
+    ver_name = str(latest.get("version_name", "1.0.0"))
+    ver_code = str(latest.get("version_code", "0"))
+    asset = latest.get("asset", {})
+    download_url = asset.get("url")
+    if not download_url:
+        urls = asset.get("urls", [])
+        if urls:
+            download_url = urls[0]
+
+    if not download_url:
+        raise RuntimeError(f"Download URL missing in APKPure asset: {asset}")
+
+    return download_url, ver_name, ver_code
 
 
 def read_uleb128(data: bytes, p: int) -> Tuple[int, int]:
@@ -315,14 +350,35 @@ def main():
         shutil.rmtree(work_dir)
     os.makedirs(work_dir, exist_ok=True)
 
-    input_source = args.input or DEFAULT_XAPK_URL
+    input_source = args.input
     xapk_path = os.path.join(work_dir, "source.xapk")
 
-    if os.path.isfile(input_source):
+    # Priority 1: Check for input file in input/ folder
+    input_dir = "input"
+    if not input_source and os.path.isdir(input_dir):
+        candidates = [
+            os.path.join(input_dir, f)
+            for f in os.listdir(input_dir)
+            if f.lower().endswith((".xapk", ".zip"))
+        ]
+        if candidates:
+            input_source = candidates[0]
+            print(f"Found local XAPK in input directory: {input_source}")
+
+    # Priority 2: Use provided local file
+    if input_source and os.path.isfile(input_source):
         print(f"Using local XAPK: {input_source}")
         shutil.copy2(input_source, xapk_path)
-    else:
+    # Priority 3: Download from custom URL
+    elif input_source and input_source.startswith(("http://", "https://")):
+        print(f"Downloading from custom URL: {input_source}")
         download_file(input_source, xapk_path)
+    # Priority 4: Query APKPure API directly (CDN link)
+    else:
+        print("Querying APKPure mobile API for direct CDN link...")
+        cdn_url, api_ver_name, api_ver_code = get_apkpure_download_info(DEFAULT_PACKAGE)
+        print(f"APKPure latest version: {api_ver_name} ({api_ver_code})")
+        download_file(cdn_url, xapk_path)
 
     # Extract XAPK
     extract_dir = os.path.join(work_dir, "extracted")
