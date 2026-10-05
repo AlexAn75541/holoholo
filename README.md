@@ -112,7 +112,7 @@ When a new game version is released, you can update without losing any save data
 
 ---
 
-## Unlocking 120 FPS / Game Dashboard on Nothing OS
+## Unlocking 120 FPS / Game Dashboard
 
 On Nothing OS 4.1:
 1. Open **Settings -> Special features -> Game Mode / Game Dashboard**.
