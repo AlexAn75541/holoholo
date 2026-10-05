@@ -332,7 +332,7 @@ def zipalign_and_sign(
     apk_path: str,
     output_path: str,
     keystore_path: str,
-    key_pass: str = "holoholo",
+    key_pass: str = "android",
     key_alias: str = "release"
 ) -> None:
     # Find zipalign and apksigner
@@ -405,7 +405,7 @@ def main():
     parser = argparse.ArgumentParser(description="Hololive Dreams APK/XAPK Patcher")
     parser.add_argument("--input", default=None, help="Input XAPK path or direct download URL")
     parser.add_argument("--keystore", default="keystore/release.p12", help="Keystore path")
-    parser.add_argument("--keystore-pass", default="holoholo", help="Keystore password")
+    parser.add_argument("--keystore-pass", default="android", help="Keystore password")
     parser.add_argument("--keystore-alias", default="release", help="Keystore key alias")
     parser.add_argument("--dist-dir", default="dist", help="Output directory")
     parser.add_argument("--patch-version", required=True, help="Release version, e.g. 0.1-beta")
