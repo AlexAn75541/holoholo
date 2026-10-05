@@ -364,6 +364,8 @@ def zipalign_and_sign(
         ks_type = "PKCS12" if keystore_path.endswith(".p12") else "JKS"
         run_cmd([
             apksigner_bin, "sign",
+            "--v2-signing-enabled", "true",
+            "--v3-signing-enabled", "true",
             "--ks", keystore_path,
             "--ks-type", ks_type,
             "--ks-pass", f"pass:{key_pass}",

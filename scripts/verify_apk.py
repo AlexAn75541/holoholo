@@ -44,8 +44,9 @@ def verify(apk: Path, source_manifest: Path):
         raise ValueError(f'APK package/version differs from source: {match.groups() if match else "missing"}')
 
     xml = command('aapt', 'dump', 'xmltree', str(apk), 'AndroidManifest.xml')
-    if re.search(r'android:requiredSplitTypes[^\n]*"[^"\n]+"', xml):
-        raise ValueError('manifest still requires missing split types')
+    for line in xml.splitlines():
+        if 'requiredSplitTypes' in line and re.search(r'(?:="[^"\n]+"|Raw: "[^"\n]+")', line):
+            raise ValueError('manifest still requires missing split types')
     if re.search(r'com\.android\.vending\.(?:splits(?:\.required)?|derived\.apk\.id)', xml):
         raise ValueError('manifest still declares Play split metadata')
     if re.search(r'^\s*A: split=', xml, re.M):
@@ -53,8 +54,9 @@ def verify(apk: Path, source_manifest: Path):
 
     command('zipalign', '-c', '-P', '16', '4', str(apk))
     signature = command('apksigner', 'verify', '--min-sdk-version', '36', '--verbose', str(apk))
-    if 'Verified using v2 scheme (APK Signature Scheme v2): true' not in signature:
-        raise ValueError('APK Signature Scheme v2 not verified')
+    if not any(f'Verified using {scheme} scheme (APK Signature Scheme {scheme}): true' in signature
+               for scheme in ('v2', 'v3')):
+        raise ValueError('neither APK Signature Scheme v2 nor v3 verified')
     print(f'Static APK checks passed: {apk.name} (not device-install or gameplay proof)')
 
 

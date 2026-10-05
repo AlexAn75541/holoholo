@@ -9,7 +9,7 @@ from scripts.verify_apk import verify
 from scripts.patcher import merge_split_apks
 
 BADGING = "package: name='game.qualiarts.hololive.dreams.com' versionCode='1790677758' versionName='1.2.1'\n"
-SIGNATURE = 'Verified using v2 scheme (APK Signature Scheme v2): true\n'
+SIGNATURE = 'Verified using v3 scheme (APK Signature Scheme v3): true\n'
 
 
 class VerifyApkTests(unittest.TestCase):
@@ -34,7 +34,7 @@ class VerifyApkTests(unittest.TestCase):
             if 'badging' in argv:
                 return BADGING
             if 'xmltree' in argv:
-                return 'E: manifest\n  A: android:requiredSplitTypes(0x0101064e)=""\n'
+                return 'E: manifest\n  A: android:requiredSplitTypes(0x0101064e)="" (Raw: "")\n'
             if 'apksigner' in argv:
                 return SIGNATURE
             return ''
@@ -74,6 +74,15 @@ class VerifyApkTests(unittest.TestCase):
              patch('scripts.verify_apk.command', side_effect=[
                  BADGING, 'E: manifest\n  A: android:requiredSplitTypes="base__abi"\n']):
             with self.assertRaisesRegex(ValueError, 'split types'):
+                verify(self.apk, self.manifest)
+
+    def test_missing_signature_blocks(self):
+        with patch('scripts.verify_apk.shutil.which', return_value='/sdk/tool'), \
+             patch('scripts.verify_apk.command', side_effect=[
+                 BADGING, 'E: manifest\n', '',
+                 'Verified using v2 scheme (APK Signature Scheme v2): false\n'
+             ]):
+            with self.assertRaisesRegex(ValueError, 'neither APK Signature Scheme'):
                 verify(self.apk, self.manifest)
 
     def test_wrong_package_blocks(self):
