@@ -48,16 +48,21 @@ jobs:
           import json, os, re, subprocess
           from scripts.patcher import get_apkpure_download_info
 
+          _, game_ver, game_code = get_apkpure_download_info()
           releases = json.loads(subprocess.check_output(
               ['gh', 'release', 'list', '--json', 'tagName', '--limit', '100'], text=True))
           release_tags = [r['tagName'] for r in releases]
           tags = subprocess.check_output(['git', 'tag', '--list'], text=True).splitlines()
-          version = '0.3-beta' if '0.3-beta' not in tags else (
-              f"0.3.{max([0] + [int(m.group(1)) for t in tags if (m := re.fullmatch(r'0\.3\.(\d+)-beta', t))]) + 1}-beta")
+
+          all_tags = set(tags + release_tags)
+          pattern = rf'^{re.escape(game_ver)}-patched-(\d+)$'
+          revs = [int(m.group(1)) for t in all_tags if (m := re.fullmatch(pattern, t))]
+          version = f"{game_ver}-patched-{max([0] + revs) + 1}"
 
           if os.environ['EVENT_NAME'] == 'schedule':
-              _, _, game_code = get_apkpure_download_info()
-              latest_tag = next((t for t in release_tags if re.fullmatch(r'0\.[1-9][0-9]*(?:\.[1-9][0-9]*)?-beta', t)), None)
+              latest_tag = next((t for t in release_tags if re.fullmatch(r'[0-9]+(?:\.[0-9]+)*-patched-[1-9][0-9]*', t)), None)
+              if not latest_tag:
+                  latest_tag = next((t for t in release_tags if re.fullmatch(r'0\.[1-9][0-9]*(?:\.[1-9][0-9]*)?-beta', t)), None)
               latest_body = subprocess.check_output(
                   ['gh', 'release', 'view', latest_tag, '--json', 'body', '--jq', '.body'], text=True) if latest_tag else ''
               if f'Game version code: `{game_code}`' in latest_body:
@@ -105,7 +110,7 @@ jobs:
           apk=(dist/*.apk)
           test "${#apk[@]}" -eq 1
           gh release create "$TAG" "${apk[0]}" --title "$TITLE" \
-            --notes "Patch build $TAG (beta). Game version: $GAME_VERSION. Game version code: \`$GAME_CODE\`. Contains standalone arm64 APK with uncompressed resources.arsc (4-byte aligned), 16KiB page alignment, and v2/v3 signatures. Upstream package version remains intact."
+            --notes "Patch build $TAG. Game version: $GAME_VERSION. Game version code: \`$GAME_CODE\`. Contains standalone arm64 APK with uncompressed resources.arsc (4-byte aligned), 16KiB page alignment, and v2/v3 signatures. Upstream package version remains intact."
       - name: Prune superseded patch releases
         if: steps.version.outputs.skip != 'true'
         env:
@@ -115,7 +120,7 @@ jobs:
         run: |
           gh release list --json tagName --limit 100 --jq '.[].tagName' | while IFS= read -r tag; do
             if [ "$tag" != "$CURRENT_TAG" ]; then
-              if [[ "$tag" == "v1.2.1-patched" || "$tag" =~ ^0\.[1-9][0-9]*(\.[1-9][0-9]*)?-beta$ ]]; then
+              if [[ "$tag" == "v1.2.1-patched" || "$tag" =~ ^0\.[1-9][0-9]*(\.[1-9][0-9]*)?-beta$ || "$tag" =~ ^[0-9]+(\.[0-9]+)*-patched-[0-9]+$ ]]; then
                 gh release delete "$tag" --cleanup-tag --yes
               fi
             fi

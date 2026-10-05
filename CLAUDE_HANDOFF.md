@@ -2,7 +2,7 @@
 
 ## User goal
 
-Install hololive Dreams (`game.qualiarts.hololive.dreams.com`) on a Nothing OS 4.1 / Android 16 phone without leaving Developer Options enabled. Source: APKPure XAPK. Obtainium/ObtainX should recognize one GitHub release APK and support seamless updates. Preserve the original game package name and Android version code; patch-release labels start at `0.3-beta` (then `0.3.1-beta`, etc.) as requested. Do not promote to `1.0` until the user confirms installation and gameplay. No manual signing labor requested.
+Install hololive Dreams (`game.qualiarts.hololive.dreams.com`) on a Nothing OS 4.1 / Android 16 phone without leaving Developer Options enabled. Source: APKPure XAPK. Obtainium/ObtainX should recognize one GitHub release APK and support seamless updates. Preserve the original game package name and Android version code; patch-release labels follow `{game ver}-patched-{patchedver}` starting at `1.2.1-patched-1` (then `1.2.1-patched-2`, etc.) as requested. No manual signing labor requested.
 
 ## Technical Findings on Google Login vs Sideloading
 

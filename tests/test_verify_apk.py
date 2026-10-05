@@ -6,7 +6,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from scripts.verify_apk import verify
-from scripts.patcher import merge_split_apks
+from scripts.patcher import merge_split_apks, resolve_patch_version
 
 BADGING = "package: name='game.qualiarts.hololive.dreams.com' versionCode='1790677758' versionName='1.2.1'\n"
 SIGNATURE = 'Verified using v3 scheme (APK Signature Scheme v3): true\n'
@@ -89,6 +89,16 @@ class VerifyApkTests(unittest.TestCase):
         self.manifest.write_text(json.dumps({'package_name': 'unexpected'}))
         with self.assertRaisesRegex(ValueError, 'unexpected source package'):
             verify(self.apk, self.manifest)
+
+    def test_resolve_patch_version(self):
+        self.assertEqual(resolve_patch_version(None, '1.2.1'), '1.2.1-patched-1')
+        self.assertEqual(resolve_patch_version('1', '1.2.1'), '1.2.1-patched-1')
+        self.assertEqual(resolve_patch_version('2', '1.2.1'), '1.2.1-patched-2')
+        self.assertEqual(resolve_patch_version('1.2.1-patched-1', '1.2.1'), '1.2.1-patched-1')
+        with self.assertRaises(ValueError):
+            resolve_patch_version('0.3-beta', '1.2.1')
+        with self.assertRaises(ValueError):
+            resolve_patch_version('bad', '1.2.1')
 
 
 if __name__ == '__main__':

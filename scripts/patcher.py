@@ -401,6 +401,20 @@ def download_file(url: str, dest_path: str) -> None:
     print()
 
 
+def resolve_patch_version(patch_version: Optional[str], version_name: str) -> str:
+    """
+    Resolves the release patch version tag.
+    Format: {game ver}-patched-{patchedver} (e.g. 1.2.1-patched-1).
+    """
+    if patch_version is None:
+        return f"{version_name}-patched-1"
+    if re.fullmatch(r"[1-9][0-9]*", patch_version):
+        return f"{version_name}-patched-{patch_version}"
+    if not re.fullmatch(r"[0-9]+(?:\.[0-9]+)*-patched-[1-9][0-9]*", patch_version):
+        raise ValueError(f"Patch version must follow {{game ver}}-patched-{{patchedver}} (e.g. {version_name}-patched-1)")
+    return patch_version
+
+
 def main():
     parser = argparse.ArgumentParser(description="Hololive Dreams APK/XAPK Patcher")
     parser.add_argument("--input", default=None, help="Input XAPK path or direct download URL")
@@ -408,7 +422,7 @@ def main():
     parser.add_argument("--keystore-pass", default="android", help="Keystore password")
     parser.add_argument("--keystore-alias", default="release", help="Keystore key alias")
     parser.add_argument("--dist-dir", default="dist", help="Output directory")
-    parser.add_argument("--patch-version", required=True, help="Release version, e.g. 0.1-beta")
+    parser.add_argument("--patch-version", default=None, help="Release version, e.g. 1.2.1-patched-1 or 1")
     args = parser.parse_args()
 
     os.makedirs(args.dist_dir, exist_ok=True)
@@ -501,9 +515,8 @@ def main():
     merge_split_apks(patched_base_apk, split_apk_paths, merged_apk_unsigned)
 
     # Cosmetic names
-    if not re.fullmatch(r"0\.[1-9][0-9]*(?:\.[1-9][0-9]*)?-beta", args.patch_version):
-        raise ValueError("Patch version must be 0.X-beta or 0.X.Y-beta (e.g. 0.2-beta, 0.2.1-beta)")
-    cosmetic_base = f"hololive-dreams-{version_name}-{args.patch_version}"
+    patch_ver = resolve_patch_version(args.patch_version, version_name)
+    cosmetic_base = f"hololive-dreams-{patch_ver}"
     output_standalone_apk = os.path.join(args.dist_dir, f"{cosmetic_base}.apk")
 
     # Sign standalone APK
@@ -525,8 +538,8 @@ def main():
             f.write(f"package_name={package_name}\n")
             f.write(f"version_name={version_name}\n")
             f.write(f"version_code={version_code}\n")
-            f.write(f"tag_name={args.patch_version}\n")
-            f.write(f"release_title=hololive Dreams patch {args.patch_version} (game {version_name})\n")
+            f.write(f"tag_name={patch_ver}\n")
+            f.write(f"release_title=hololive Dreams {patch_ver}\n")
             f.write(f"standalone_apk={output_standalone_apk}\n")
 
 

@@ -114,12 +114,28 @@ When a new game version is released, you can update without losing any save data
 
 ## Unlocking 120 FPS / Game Dashboard
 
-On Nothing OS 4.1:
+**Package ID:** `game.qualiarts.hololive.dreams.com`  
+**App List Name:** `hololive Dreams` (or `ホロライブドリームス`)
+
+### Option 1: Nothing OS GUI
 1. Open **Settings -> Special features -> Game Mode / Game Dashboard**.
-2. Tap **Add Apps** and ensure `hololive Dreams` is enabled.
+2. Tap **Add Apps** and ensure `hololive Dreams` (`game.qualiarts.hololive.dreams.com`) is enabled.
 3. Open **Settings -> Display -> Refresh rate** -> set to **High (120 Hz)**.
 4. If available, open **Apps with high refresh rate** and toggle `hololive Dreams` to 120 Hz.
 5. In-game, open **メニュー -> ライブ設定 / 動作設定** and set quality/framerate to **High (高)**.
+
+### Option 2: Force Game Mode & 120 Hz via ADB
+If the app does not show up in the Game Dashboard list:
+
+1. Force Android Game Mode performance profile:
+   ```bash
+   adb shell cmd game set --mode 2 game.qualiarts.hololive.dreams.com
+   ```
+2. Force display refresh rate to 120 Hz:
+   ```bash
+   adb shell settings put system peak_refresh_rate 120.0
+   adb shell settings put system min_refresh_rate 120.0
+   ```
 
 ---
 
