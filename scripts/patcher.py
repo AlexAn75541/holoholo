@@ -209,19 +209,97 @@ def patch_apk(input_apk_path: str, output_apk_path: str) -> List[str]:
     return all_patched_actions
 
 
+def clean_manifest_for_standalone(axml_bytes: bytes) -> bytes:
+    """
+    Cleans AndroidManifest.xml binary XML for standalone single APK install:
+    1. Removes Google Play split-requirement meta-data tags (com.android.vending.splits.required, etc.)
+       which cause Android 14/15/16 PackageInstaller to fail with STATUS_FAILURE_INCOMPATIBLE.
+    2. Clears requiredSplitTypes='base__abi' attribute on <manifest>.
+    """
+    axml = bytearray(axml_bytes)
+    chunk_type, chunk_size = struct.unpack('<II', axml[8:16])
+    string_count, style_count, flags, strings_start, styles_start = struct.unpack('<IIIII', axml[16:36])
+    offsets = struct.unpack(f'<{string_count}I', axml[36 : 36 + string_count * 4])
+    pool_data = axml[8 + strings_start :]
+    strings = []
+    for off in offsets:
+        u16_len = struct.unpack('<H', pool_data[off : off + 2])[0]
+        s = pool_data[off + 2 : off + 2 + u16_len * 2].decode('utf-16le', errors='replace')
+        strings.append(s)
+
+    empty_idx = strings.index('') if '' in strings else None
+    req_split_idx = strings.index('requiredSplitTypes') if 'requiredSplitTypes' in strings else None
+
+    res_type, res_size = struct.unpack('<II', axml[8 + chunk_size : 8 + chunk_size + 8])
+    chunks = []
+    p = 8 + chunk_size
+    if res_type == 0x00080180:
+        chunks.append(('res_map', p, res_size))
+        p += res_size
+
+    while p < len(axml):
+        ctype, csize = struct.unpack('<II', axml[p : p + 8])
+        chunks.append((ctype, p, csize))
+        p += csize
+
+    to_remove = set()
+    for i, (ctype, cpos, csize) in enumerate(chunks):
+        if ctype == 0x00100102:  # START_TAG
+            name_idx = struct.unpack('<I', axml[cpos + 20 : cpos + 24])[0]
+            tag_name = strings[name_idx]
+            if tag_name == 'meta-data':
+                attr_count = struct.unpack('<H', axml[cpos + 28 : cpos + 30])[0]
+                ap = cpos + 36
+                m_name = None
+                for _ in range(attr_count):
+                    aname = struct.unpack('<I', axml[ap + 4 : ap + 8])[0]
+                    aval_str = struct.unpack('<I', axml[ap + 8 : ap + 12])[0]
+                    if strings[aname] == 'name' and aval_str < len(strings):
+                        m_name = strings[aval_str]
+                    ap += 20
+                if m_name in ('com.android.vending.splits.required', 'com.android.vending.splits', 'com.android.vending.derived.apk.id'):
+                    to_remove.add(i)
+                    to_remove.add(i + 1)  # Matching END_TAG
+
+    new_axml = bytearray(axml[: chunks[0][1]])
+    for i, (ctype, cpos, csize) in enumerate(chunks):
+        if i in to_remove:
+            continue
+        chunk_bytes = axml[cpos : cpos + csize]
+        if ctype == 0x00100102:
+            name_idx = struct.unpack('<I', chunk_bytes[20:24])[0]
+            if strings[name_idx] == 'manifest' and req_split_idx is not None and empty_idx is not None:
+                attr_count = struct.unpack('<H', chunk_bytes[28:30])[0]
+                ap = 36
+                for _ in range(attr_count):
+                    aname = struct.unpack('<I', chunk_bytes[ap + 4 : ap + 8])[0]
+                    if aname == req_split_idx:
+                        chunk_bytes[ap + 8 : ap + 12] = struct.pack('<I', empty_idx)
+                        chunk_bytes[ap + 16 : ap + 20] = struct.pack('<i', empty_idx)
+                    ap += 20
+        new_axml.extend(chunk_bytes)
+
+    new_axml[4:8] = struct.pack('<I', len(new_axml))
+    return bytes(new_axml)
+
+
 def merge_split_apks(patched_base_apk: str, split_apk_paths: List[str], output_merged_apk: str) -> None:
     """
-    Merges native libraries (config.*.apk) and assets (UnityDataAssetPack.apk) into base APK.
+    Merges native libraries (config.*.apk) and assets (UnityDataAssetPack.apk) into base APK,
+    and strips split requirements from AndroidManifest.xml.
     """
     seen_entries = set()
     with zipfile.ZipFile(output_merged_apk, 'w', compression=zipfile.ZIP_DEFLATED) as out_zip:
-        # 1. Write patched base APK entries
+        # 1. Write patched base APK entries (with cleaned AndroidManifest.xml)
         with zipfile.ZipFile(patched_base_apk, 'r') as base_zip:
             for item in base_zip.infolist():
                 if is_signature_file(item.filename):
                     continue
                 seen_entries.add(item.filename)
                 data = base_zip.read(item.filename)
+                if item.filename == "AndroidManifest.xml":
+                    print("Cleaning AndroidManifest.xml split requirements for standalone APK...")
+                    data = clean_manifest_for_standalone(data)
                 compress_type = zipfile.ZIP_STORED if item.filename.endswith(".so") else item.compress_type
                 out_zip.writestr(item.filename, data, compress_type=compress_type)
 

@@ -123,6 +123,11 @@ jobs:
             --keystore-alias release \
             --dist-dir dist
 
+      - name: Verify Android 16+ Installation Compliance
+        if: steps.check-version.outputs.skip != 'true'
+        run: |
+          python3 scripts/verify_apk.py dist
+
       - name: Publish GitHub Release
         if: steps.check-version.outputs.skip != 'true'
         uses: softprops/action-gh-release@v2
@@ -139,15 +144,16 @@ jobs:
 
             Automated build for **game.qualiarts.hololive.dreams.com** (Version code: `${{ steps.patch.outputs.version_code }}`).
 
-            #### Applied Patches
-            - **Google Play Installer & Licensing Bypass**: Patched PairIP check in `classes.dex` (`performLocalInstallerCheck`, `isLocalCheckPassed`, `checkLicense`, and `attachBaseContext`).
-            - Sideloaded installs will no longer display the Google Play error screen.
-            - Both APKs are signed with the permanent repository release key.
+            #### Applied Patches & Fixes
+            - **Google Play Installer & Licensing Bypass**: Patched PairIP check in `classes.dex` (`performLocalInstallerCheck`, `isLocalCheckPassed`, `checkLicense`, and `attachBaseContext`). Sideloaded installs will no longer display the Google Play error screen.
+            - **Android 16+ Split Incompatibility Fix**: Neutralized `requiredSplitTypes='base__abi'` and `com.android.vending.splits.required` in `AndroidManifest.xml` so Android PackageInstaller can install the standalone APK without `failureIncompatible`.
+            - **16KB Page Alignment**: Native libraries (`.so`) are 16KB aligned for compatibility with Android 15/16 memory architectures.
+            - **Permanent Key Signing**: All files are signed with the permanent repository release key (Signature schemes v2 & v3).
 
             #### Available Downloads
             1. **`hololive-dreams-${{ steps.patch.outputs.version_name }}-patched.apk`**
                - Standalone Universal APK (merged base + arm64_v8a native libs + asset pack).
-               - Recommended for standard package installers & Obtainium.
+               - **Recommended**: In Obtainium, set filter regex to `.*\.apk$` to download and install this file.
             2. **`hololive-dreams-${{ steps.patch.outputs.version_name }}-patched.xapk`**
                - Signed XAPK containing all split APKs and original manifest.
 
