@@ -2,95 +2,124 @@
 
 [![Update & Release](https://github.com/AlexAn75541/holoholo/actions/workflows/patch-and-release.yml/badge.svg)](https://github.com/AlexAn75541/holoholo/actions/workflows/patch-and-release.yml)
 
-Automated GitHub Actions pipeline for **hololive Dreams** (`game.qualiarts.hololive.dreams.com`). It fetches an APKPure XAPK, patches the Google Play licensing/installer lock (PairIP), properly packages and signs a standalone arm64 APK, and publishes releases for auto-updating via **Obtainium**.
+Automated GitHub Actions pipeline for **hololive Dreams** (`game.qualiarts.hololive.dreams.com`). It fetches the official APKPure XAPK, patches the Google Play licensing/installer lock (PairIP), properly packages and signs a standalone arm64 APK, and publishes releases for auto-updating via **Obtainium**.
 
 ---
 
-## The Problem
+## Sideloading vs. Account Linking / Google Login: The Reality
 
-When sideloading `game.qualiarts.hololive.dreams.com` outside of Google Play (or in unsupported regions), the game launches into a blocking Google Play error screen (`com.pairip.licensecheck.LicenseActivity`).
+When sideloading this game, there are two distinct installation paths depending on your priorities:
 
-Normally, bypassing this check requires manual ADB installation commands:
-```bash
-adb shell pm install-create -i "com.android.vending" -r
-adb shell pm install-write <session> ...
-adb shell pm install-commit <session>
-```
+| Feature / Goal | Method A: Sideload Patched APK (Obtainium) | Method B: ADB Install as Google Play (`-i com.android.vending`) |
+| :--- | :--- | :--- |
+| **Google Account Linking** | ❌ Fails (Google OAuth server checks SHA-256 fingerprint) | ✅ Works (Uses official Play Store signature) |
+| **In-Game Data Transfer ID (引継ぎ)** | ✅ Works completely | ✅ Works completely |
+| **Google / OEM Game Dashboard & 120 FPS** | ⚠️ Generic profile unless set in OS Display settings | ✅ Works natively (installer attributed to Play Store) |
+| **Developer Options / USB Debugging Required** | ❌ **No** (Safe for banking apps) | ⚠️ **Yes** (During initial install & updates) |
+| **Update Process** | Seamless 1-tap in Obtainium | Connect USB, enable ADB, run shell commands |
 
-However, many users cannot enable **Developer Options** or **USB Debugging** because banking apps, work profiles, and integrity checks refuse to run when Developer Mode is active.
-
-Furthermore, on **Android 11 through Android 16 (API 30–36+)**, Android's `PackageInstaller` strictly enforces:
-1. `resources.arsc` must be **stored uncompressed** and 4-byte aligned.
-2. Native `.so` libraries must be **16 KiB page aligned** (mandatory for Android 15/16).
-3. Split-requirement tags (`requiredSplitTypes="base__abi"`, `com.android.vending.splits.required`) must be stripped if merged into a standalone APK, or PackageInstaller throws `STATUS_FAILURE_INCOMPATIBLE`.
-
----
-
-## The Solution
-
-This repository automates the complete patching, packaging, and signing pipeline via GitHub Actions:
-
-1. **DEX Bytecode Patch**: Directly patches `com.pairip.licensecheck.LicenseClient` inside `classes.dex`:
-   - `performLocalInstallerCheck` -> returns `true` (skips installer verification).
-   - `isLocalCheckPassed` -> returns `true`.
-   - `checkLicense` -> returns early (`return-void`).
-   - `attachBaseContext` -> nops out the `checkLicense` call.
-2. **Standalone arm64 APK Packaging**:
-   - Merges `config.arm64_v8a.apk` native libraries and `UnityDataAssetPack.apk` assets into the base APK.
-   - Strips split metadata from `AndroidManifest.xml`.
-   - Stores `resources.arsc` **uncompressed** to comply with Android 11+ requirements.
-   - Aligns all 22 native `.so` files to **16 KiB boundaries** (`zipalign -P 16 -f 4`) for Android 15/16 devices.
-3. **Automated Verification**: CI runs `scripts/verify_apk.py` verifying ZIP integrity, uncompressed resources, manifest cleaning, 16 KiB library alignment, and v2/v3 signatures before publishing.
-4. **Single APK Release**: Releases contain only the standalone `.apk` (no confusing multi-asset downloads in Obtainium).
-5. **Continuous Releases**: Starts at `0.3-beta` (advancing to `0.3.1-beta`, etc.). Superseded beta releases are pruned automatically.
+> **Why Google Login / Play Games fails on any patched APK:**
+> Google's OAuth 2.0 servers verify client requests by checking the cryptographic SHA-256 certificate fingerprint of the running app against Google Cloud Console. Qualiarts's server only authorizes Google's official App Signing Key (`db:f5:a4:...`). Any modified or re-signed APK has a different signature, so Google's backend unconditionally rejects Google Sign-In with an OAuth mismatch (`10: DEVELOPER_ERROR`).
+>
+> **Recommended Solution:** Use the publisher's built-in **Data Transfer ID & Password (データ引継ぎ)** system under the game's menu. It works identically across all devices and clients without relying on Google servers.
 
 ---
 
-## Quick Start (Obtainium Setup)
+## Method A: Clean Obtainium Setup (No Developer Options)
 
-To receive automatic game updates on your Android phone:
+Use this method if banking apps or security profiles prohibit keeping Developer Options enabled.
 
-1. Install [Obtainium](https://github.com/ImranR98/Obtainium) on your device.
-2. Open Obtainium, tap **Add App**.
-3. Paste this repository URL:
-   ```text
-   https://github.com/AlexAn75541/holoholo
-   ```
-4. Configure options:
-   - **Filter regular expression**: `.*\.apk$` (ensures only the standalone APK is downloaded).
-   - **Version detection**: Default (GitHub Releases).
-5. Tap **Add**, then tap **Install**.
-
----
-
-## First-Time Installation Note & Resolving `failureConflict`
-
-Android enforces that an app cannot be updated by an APK signed with a different key (`STATUS_FAILURE_CONFLICT` / `INSTALL_FAILED_UPDATE_INCOMPATIBLE`). Because your previous installation (or ADB install) was signed with Qualiarts's original Play Store key, and this patched release is signed with this repository's release key:
-
-1. **Back up your game account**: In the game title menu or settings, link your account or generate a **Data Transfer ID & Password** (引継ぎ).
-2. **Cleanly uninstall the official app**:
+### First-Time Installation
+1. If you previously had the official app installed, back up your account with a **Data Transfer ID & Password** (引継ぎ) first.
+2. Cleanly uninstall the existing app:
    - Go to **Settings -> Apps -> hololive Dreams**.
    - Tap **Storage & cache -> Clear storage**.
-   - Tap **Uninstall**.
-   - **Crucial**: If Android displays a popup asking *"Keep X GB of app data?"*, ensure the checkbox is **UNCHECKED**! If data is kept, Android retains the old signing certificate in `/data/system/packages.xml` and blocks new keys with `failureConflict`.
-   - If using Nothing OS **Private Space**, **Cloned Apps**, or a **Work Profile**, ensure the app is uninstalled from those spaces as well.
-3. **Install `0.3-beta` via Obtainium**:
-   - Tap **Install**. It will now install cleanly without conflicts.
-4. **Subsequent updates**: All future patch updates from this repo use the exact same key and update seamlessly in-place via Obtainium with zero data loss or re-linking required.
+   - Tap **Uninstall**. Ensure the popup checkbox *"Keep app data"* is **UNCHECKED** (prevents `failureConflict`).
+3. In **Obtainium**, tap **Add App**:
+   - URL: `https://github.com/AlexAn75541/holoholo`
+   - Filter regular expression: `.*\.apk$`
+4. Tap **Add**, then tap **Install**.
+5. Open the game and restore your account using your Data Transfer ID. Future updates from Obtainium will update in-place without data loss.
 
 ---
 
-## Patch Versions
+## Method B: ADB Sideload with Google Play Attribution
 
-Release tags use `0.3-beta`, then `0.3.1-beta`, `0.3.2-beta`, etc. These identify **patch builds**, not game versions. The original game version stays inside the APK. Tags remain beta until a user verifies installation and gameplay and explicitly requests `1.0`. Only the newest patch release is retained after publication.
+This method installs the **unmodified official split APKs** while setting Google Play (`com.android.vending`) as the installer. This bypasses the Google Play licensing check without patching the binary, allowing **official Google Account login** and **Game Dashboard / 120 FPS** to work.
 
-## Manual Workflow Trigger
+### Initial Installation via ADB
 
-To build a release on demand:
+1. Download and extract the official XAPK (e.g. from APKPure):
+   - `game.qualiarts.hololive.dreams.com.apk` (Base APK)
+   - `config.arm64_v8a.apk` (ABI split)
+   - `UnityDataAssetPack.apk` (Asset split)
+2. Connect your phone via USB and enable USB Debugging.
+3. Push files to temporary device storage:
+   ```bash
+   adb push game.qualiarts.hololive.dreams.com.apk /data/local/tmp/base.apk
+   adb push config.arm64_v8a.apk /data/local/tmp/config.apk
+   adb push UnityDataAssetPack.apk /data/local/tmp/asset.apk
+   ```
+4. Create an installation session attributed to Google Play:
+   ```bash
+   adb shell pm install-create -i "com.android.vending" -r
+   ```
+   *(This outputs a session ID, e.g. `Success: created install session [12345678]`)*
+5. Stage the APKs into the session:
+   ```bash
+   adb shell pm install-write 12345678 base.apk /data/local/tmp/base.apk
+   adb shell pm install-write 12345678 config.apk /data/local/tmp/config.apk
+   adb shell pm install-write 12345678 asset.apk /data/local/tmp/asset.apk
+   ```
+6. Commit the installation and clean up:
+   ```bash
+   adb shell pm install-commit 12345678
+   adb shell rm /data/local/tmp/*.apk
+   ```
+7. *(Optional)* Turn off Developer Options once installed if required by banking apps.
 
-1. Navigate to the [Actions tab](https://github.com/AlexAn75541/holoholo/actions/workflows/patch-and-release.yml).
-2. Select **Patch and Release Hololive Dreams**.
-3. Click **Run workflow**.
+---
+
+### Updating the Game via ADB (When a New Version Drops)
+
+When a new game version is released, you can update without losing any save data or account links:
+
+1. Download the new version's XAPK and extract the updated APKs (`base.apk`, `config.arm64_v8a.apk`, `UnityDataAssetPack.apk`).
+2. Connect phone via USB and enable USB Debugging.
+3. Push the new APKs:
+   ```bash
+   adb push game.qualiarts.hololive.dreams.com.apk /data/local/tmp/base.apk
+   adb push config.arm64_v8a.apk /data/local/tmp/config.apk
+   adb push UnityDataAssetPack.apk /data/local/tmp/asset.apk
+   ```
+4. Create an update session (the `-r` flag preserves existing app data):
+   ```bash
+   adb shell pm install-create -i "com.android.vending" -r -d
+   ```
+   *(Note the returned session ID, e.g. `87654321`)*
+5. Write the split files to the update session:
+   ```bash
+   adb shell pm install-write 87654321 base.apk /data/local/tmp/base.apk
+   adb shell pm install-write 87654321 config.apk /data/local/tmp/config.apk
+   adb shell pm install-write 87654321 asset.apk /data/local/tmp/asset.apk
+   ```
+6. Commit the update:
+   ```bash
+   adb shell pm install-commit 87654321
+   adb shell rm /data/local/tmp/*.apk
+   ```
+7. The game updates in-place. All user data, logins, and configurations are preserved.
+
+---
+
+## Unlocking 120 FPS / Game Dashboard on Nothing OS
+
+On Nothing OS 4.1:
+1. Open **Settings -> Special features -> Game Mode / Game Dashboard**.
+2. Tap **Add Apps** and ensure `hololive Dreams` is enabled.
+3. Open **Settings -> Display -> Refresh rate** -> set to **High (120 Hz)**.
+4. If available, open **Apps with high refresh rate** and toggle `hololive Dreams` to 120 Hz.
+5. In-game, open **メニュー -> ライブ設定 / 動作設定** and set quality/framerate to **High (高)**.
 
 ---
 
