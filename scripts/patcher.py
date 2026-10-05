@@ -13,6 +13,7 @@ import shutil
 import struct
 import hashlib
 import zipfile
+import tempfile
 import argparse
 import subprocess
 import urllib.request
@@ -401,6 +402,48 @@ def download_file(url: str, dest_path: str) -> None:
     print()
 
 
+def inspect_apk_version(apk_or_xapk_path: str) -> Tuple[str, str, str]:
+    """
+    Decompiles/inspects APK badging using aapt to regex extract package, versionName, and versionCode.
+    Supports both raw APK and XAPK containers.
+    """
+    temp_dir = None
+    target_apk = apk_or_xapk_path
+    try:
+        if zipfile.is_zipfile(apk_or_xapk_path) and not apk_or_xapk_path.endswith(".apk"):
+            with zipfile.ZipFile(apk_or_xapk_path, "r") as zf:
+                apk_names = [n for n in zf.namelist() if n.endswith(".apk")]
+                base_name = next((n for n in apk_names if "base" in n or DEFAULT_PACKAGE in n), apk_names[0] if apk_names else None)
+                if not base_name and "manifest.json" in zf.namelist():
+                    manifest = json.loads(zf.read("manifest.json").decode("utf-8"))
+                    return (manifest.get("package_name", DEFAULT_PACKAGE),
+                            manifest.get("version_name", "1.0.0"),
+                            manifest.get("version_code", "0"))
+                temp_dir = tempfile.mkdtemp()
+                target_apk = zf.extract(base_name, temp_dir)
+
+        if shutil.which("aapt"):
+            badging = subprocess.check_output(["aapt", "dump", "badging", target_apk], text=True)
+            pkg_m = re.search(r"package: name='([^']+)'", badging)
+            ver_m = re.search(r"versionName='([^']+)'", badging)
+            code_m = re.search(r"versionCode='([^']+)'", badging)
+            if pkg_m and ver_m and code_m:
+                return pkg_m.group(1), ver_m.group(1), code_m.group(1)
+
+        # Fallback if manifest.json in container
+        if zipfile.is_zipfile(apk_or_xapk_path):
+            with zipfile.ZipFile(apk_or_xapk_path, "r") as zf:
+                if "manifest.json" in zf.namelist():
+                    manifest = json.loads(zf.read("manifest.json").decode("utf-8"))
+                    return (manifest.get("package_name", DEFAULT_PACKAGE),
+                            manifest.get("version_name", "1.0.0"),
+                            manifest.get("version_code", "0"))
+        raise RuntimeError(f"Could not determine APK version from {apk_or_xapk_path}")
+    finally:
+        if temp_dir and os.path.exists(temp_dir):
+            shutil.rmtree(temp_dir)
+
+
 def resolve_patch_version(patch_version: Optional[str], version_name: str) -> str:
     """
     Resolves the release patch version tag.
@@ -477,7 +520,6 @@ def main():
     package_name = manifest.get("package_name", "game.qualiarts.hololive.dreams.com")
     version_name = manifest.get("version_name", "1.0.0")
     version_code = manifest.get("version_code", "0")
-    print(f"Target: {package_name} | Version Name: {version_name} | Version Code: {version_code}")
 
     # Identify base APK and split APKs
     base_apk_name = f"{package_name}.apk"
@@ -492,6 +534,16 @@ def main():
 
     if not os.path.isfile(base_apk_path):
         raise FileNotFoundError(f"Base APK not found in XAPK: {base_apk_name}")
+
+    # Inspect base APK directly via aapt dump badging regex to confirm version
+    try:
+        _, apk_ver_name, apk_ver_code = inspect_apk_version(base_apk_path)
+        version_name = apk_ver_name
+        version_code = apk_ver_code
+    except Exception as e:
+        print(f"Notice: aapt decompile check: {e}; using manifest.json")
+
+    print(f"Target: {package_name} | Version Name: {version_name} | Version Code: {version_code}")
 
     split_apk_paths = [
         os.path.join(extract_dir, f)
