@@ -13,36 +13,37 @@ on:
     branches: [main]
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: patch-release
   cancel-in-progress: false
 
 jobs:
-  patch-and-release:
+  build:
     runs-on: ubuntu-latest
+    outputs:
+      skip: ${{ steps.version.outputs.skip }}
+      tag: ${{ steps.patch.outputs.tag_name }}
+      title: ${{ steps.patch.outputs.release_title }}
+      game_version: ${{ steps.patch.outputs.version_name }}
+      game_code: ${{ steps.patch.outputs.version_code }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
-
-      - name: Locate Android build tools
+      - name: Locate Android SDK build tools
         run: |
           BT_DIR=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)
-          test -x "$BT_DIR/zipalign"
-          test -x "$BT_DIR/apksigner"
+          for tool in zipalign apksigner aapt; do test -x "$BT_DIR/$tool"; done
           echo "$BT_DIR" >> "$GITHUB_PATH"
-
       - name: Select patch version
         id: version
         env:
@@ -61,7 +62,7 @@ jobs:
               f"0.1.{max([0] + [int(m.group(1)) for t in tags if (m := re.fullmatch(r'0\.1\.(\d+)-beta', t))]) + 1}-beta")
 
           if os.environ['EVENT_NAME'] == 'schedule':
-              _, game_version, game_code = get_apkpure_download_info()
+              _, _, game_code = get_apkpure_download_info()
               latest_tag = next((t for t in release_tags if re.fullmatch(r'0\.1(?:\.[1-9][0-9]*)?-beta', t)), None)
               latest_body = subprocess.check_output(
                   ['gh', 'release', 'view', latest_tag, '--json', 'body', '--jq', '.body'], text=True) if latest_tag else ''
@@ -71,13 +72,14 @@ jobs:
                       f.write('skip=true\n')
                   raise SystemExit(0)
 
-          print(f'Patch release: {version}')
           with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
               f.write(f'patch_version={version}\n')
               f.write('skip=false\n')
           PY
-
-      - name: Build signed artifacts
+      - name: Run verifier self-checks
+        if: steps.version.outputs.skip != 'true'
+        run: PYTHONPATH=. python3 tests/test_verify_apk.py
+      - name: Build signed arm64 APK
         if: steps.version.outputs.skip != 'true'
         id: patch
         env:
@@ -86,38 +88,90 @@ jobs:
         run: |
           args=()
           if [ -n "$XAPK_URL" ]; then args+=(--input "$XAPK_URL"); fi
-          python3 scripts/patcher.py "${args[@]}" \
-            --patch-version "$PATCH_VERSION" \
-            --keystore keystore/release.p12 \
-            --dist-dir dist
-
-      - name: Verify APK and XAPK artifacts
+          python3 scripts/patcher.py "${args[@]}" --patch-version "$PATCH_VERSION" \
+            --keystore keystore/release.p12 --dist-dir dist
+      - name: Verify standalone APK
         if: steps.version.outputs.skip != 'true'
-        run: python3 scripts/verify_apk.py dist
-
-      - name: Publish release
+        run: |
+          apk=(dist/*.apk)
+          test "${#apk[@]}" -eq 1
+          python3 scripts/verify_apk.py "${apk[0]}" dist/work/extracted/manifest.json
+      - name: Save APK for device test
         if: steps.version.outputs.skip != 'true'
-        uses: softprops/action-gh-release@v2
+        uses: actions/upload-artifact@v4
         with:
-          tag_name: ${{ steps.patch.outputs.tag_name }}
-          name: ${{ steps.patch.outputs.release_title }}
-          prerelease: false
-          fail_on_unmatched_files: true
-          files: |
-            ${{ steps.patch.outputs.standalone_apk }}
-            ${{ steps.patch.outputs.repacked_xapk }}
-          body: |
-            Patch build `${{ steps.patch.outputs.tag_name }}` (beta, device install and gameplay not yet verified).
-            Game version: `${{ steps.patch.outputs.version_name }}`. Game version code: `${{ steps.patch.outputs.version_code }}`.
-            APK package version remains the upstream value; a new patch tag alone does not guarantee Android detects an in-place update.
-            Use the `.apk` asset with Obtainium's APK-only filter. The `.xapk` requires a split-capable installer.
-            Local artifact checks do not prove an Android 16 device install or successful gameplay.
+          name: candidate-apk
+          path: dist/*.apk
+          if-no-files-found: error
+          retention-days: 1
 
-      - name: Prune superseded releases
-        if: steps.version.outputs.skip != 'true'
+  android-install:
+    needs: build
+    if: needs.build.outputs.skip != 'true'
+    runs-on: [self-hosted, linux, ARM64, android16]
+    timeout-minutes: 30
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: candidate-apk
+          path: candidate
+      - name: Install and reinstall on dedicated Android 16 arm64 device
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v adb
+          mapfile -t serials < <(adb devices | awk 'NR>1 && $2=="device" {print $1}')
+          test "${#serials[@]}" -eq 1
+          serial="${serials[0]}"
+          sdk=$(adb -s "$serial" shell getprop ro.build.version.sdk | tr -d '\r')
+          abi=$(adb -s "$serial" shell getprop ro.product.cpu.abi | tr -d '\r')
+          test "$sdk" -ge 36
+          test "$abi" = arm64-v8a
+          package=game.qualiarts.hololive.dreams.com
+          if adb -s "$serial" shell pm path "$package" | grep -q '^package:'; then
+            echo 'Dedicated test device must start without this package' >&2
+            exit 1
+          fi
+          apk=(candidate/*.apk)
+          test "${#apk[@]}" -eq 1
+          cleanup() { adb -s "$serial" uninstall "$package" || true; }
+          trap cleanup EXIT
+          adb -s "$serial" install "${apk[0]}"
+          adb -s "$serial" shell pm path "$package" | grep -q '^package:'
+          adb -s "$serial" install -r "${apk[0]}"
+          adb -s "$serial" shell pm path "$package" | grep -q '^package:'
+          echo 'Android 16 arm64 clean install and same-version reinstall passed.'
+
+  publish:
+    needs: [build, android-install]
+    if: needs.build.outputs.skip != 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: candidate-apk
+          path: candidate
+      - name: Publish APK-only release
         env:
           GH_TOKEN: ${{ github.token }}
-          CURRENT_TAG: ${{ steps.patch.outputs.tag_name }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.build.outputs.tag }}
+          TITLE: ${{ needs.build.outputs.title }}
+          GAME_VERSION: ${{ needs.build.outputs.game_version }}
+          GAME_CODE: ${{ needs.build.outputs.game_code }}
+        run: |
+          set -euo pipefail
+          apk=(candidate/*.apk)
+          test "${#apk[@]}" -eq 1
+          gh release create "$TAG" "${apk[0]}" --title "$TITLE" \
+            --notes "Patch build $TAG (beta; gameplay not verified). Game version: $GAME_VERSION. Game version code: \`$GAME_CODE\`. Android 16 arm64 device clean install and same-version reinstall passed. APK version remains upstream."
+      - name: Prune superseded patch releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          CURRENT_TAG: ${{ needs.build.outputs.tag }}
         run: |
           gh release list --json tagName --limit 100 --jq '.[].tagName' | while IFS= read -r tag; do
             if [ "$tag" != "$CURRENT_TAG" ]; then

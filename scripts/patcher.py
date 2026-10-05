@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """
 Hololive Dreams APK / XAPK Patcher & Builder
-Patches PairIP (Google Play licensing / installer check) in classes.dex,
-merges split APKs into a standalone APK, and repacks signed XAPK and APK for Obtainium.
+Patches PairIP in classes.dex and merges the source XAPK splits into one signed arm64 APK.
 """
 
 import os
@@ -206,6 +205,8 @@ def patch_apk(input_apk_path: str, output_apk_path: str) -> List[str]:
                 # Store uncompressed for .so and audio/assets if wanted, or standard deflate
                 compress_type = zipfile.ZIP_STORED if item.filename.endswith(".so") else zipfile.ZIP_DEFLATED
                 out_zip.writestr(item.filename, data, compress_type=compress_type)
+    if not any('checkLicense: return_void' in action for action in all_patched_actions):
+        raise RuntimeError('PairIP checkLicense method not found; refusing unpatched build')
     return all_patched_actions
 
 
@@ -319,15 +320,6 @@ def merge_split_apks(patched_base_apk: str, split_apk_paths: List[str], output_m
                     out_zip.writestr(item.filename, data, compress_type=compress_type)
 
 
-def strip_apk_signatures(input_apk_path: str, output_apk_path: str) -> None:
-    with zipfile.ZipFile(input_apk_path, 'r') as in_zip:
-        with zipfile.ZipFile(output_apk_path, 'w', compression=zipfile.ZIP_DEFLATED) as out_zip:
-            for item in in_zip.infolist():
-                if is_signature_file(item.filename):
-                    continue
-                compress_type = zipfile.ZIP_STORED if item.filename.endswith(".so") else item.compress_type
-                out_zip.writestr(item.filename, in_zip.read(item.filename), compress_type=compress_type)
-
 
 def run_cmd(cmd: List[str]) -> str:
     res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
@@ -361,17 +353,14 @@ def zipalign_and_sign(
                     if os.path.isfile(cand_sign) and not apksigner_bin:
                         apksigner_bin = cand_sign
 
+    if not zipalign_bin or not apksigner_bin or not os.path.isfile(keystore_path):
+        raise RuntimeError('zipalign, apksigner and keystore are required')
     temp_aligned = output_path + ".aligned.tmp"
-    if zipalign_bin:
-        print(f"Aligning {apk_path} with {zipalign_bin}...")
-        run_cmd([zipalign_bin, "-p", "-f", "4", apk_path, temp_aligned])
-    else:
-        print("Warning: zipalign not found, copying directly...")
-        shutil.copy2(apk_path, temp_aligned)
+    print(f"Aligning {apk_path} with {zipalign_bin}...")
+    run_cmd([zipalign_bin, "-P", "16", "-f", "4", apk_path, temp_aligned])
 
-    if apksigner_bin and os.path.isfile(keystore_path):
+    try:
         print(f"Signing {temp_aligned} with apksigner...")
-        # Determine keystore type (PKCS12 vs JKS)
         ks_type = "PKCS12" if keystore_path.endswith(".p12") else "JKS"
         run_cmd([
             apksigner_bin, "sign",
@@ -384,12 +373,9 @@ def zipalign_and_sign(
         ])
         verify_out = run_cmd([apksigner_bin, "verify", "--verbose", output_path])
         print(f"Signature verified:\n{verify_out}")
-    else:
-        print("Warning: apksigner or keystore not found, outputting unsigned APK...")
-        shutil.move(temp_aligned, output_path)
-
-    if os.path.exists(temp_aligned):
-        os.remove(temp_aligned)
+    finally:
+        if os.path.exists(temp_aligned):
+            os.remove(temp_aligned)
 
 
 def download_file(url: str, dest_path: str) -> None:
@@ -517,7 +503,6 @@ def main():
         raise ValueError("Patch version must be 0.1-beta or 0.1.X-beta (X >= 1)")
     cosmetic_base = f"hololive-dreams-{version_name}-{args.patch_version}"
     output_standalone_apk = os.path.join(args.dist_dir, f"{cosmetic_base}.apk")
-    output_xapk = os.path.join(args.dist_dir, f"{cosmetic_base}.xapk")
 
     # Sign standalone APK
     print(f"Creating signed standalone APK: {output_standalone_apk}...")
@@ -529,42 +514,7 @@ def main():
         key_alias=args.keystore_alias
     )
 
-    # Sign individual APKs for XAPK repacking
-    signed_base_apk = os.path.join(work_dir, base_apk_name)
-    zipalign_and_sign(
-        patched_base_apk,
-        signed_base_apk,
-        keystore_path=args.keystore,
-        key_pass=args.keystore_pass,
-        key_alias=args.keystore_alias
-    )
-
-    signed_splits = []
-    for split_path in split_apk_paths:
-        fname = os.path.basename(split_path)
-        stripped_split = os.path.join(work_dir, f"stripped_{fname}")
-        strip_apk_signatures(split_path, stripped_split)
-        signed_split = os.path.join(work_dir, fname)
-        zipalign_and_sign(
-            stripped_split,
-            signed_split,
-            keystore_path=args.keystore,
-            key_pass=args.keystore_pass,
-            key_alias=args.keystore_alias
-        )
-        signed_splits.append(signed_split)
-
-    # Repack XAPK
-    print(f"Repacking XAPK: {output_xapk}...")
-    with zipfile.ZipFile(output_xapk, 'w', compression=zipfile.ZIP_STORED) as out_xapk:
-        out_xapk.write(manifest_path, "manifest.json")
-        out_xapk.write(signed_base_apk, base_apk_name)
-        for s in signed_splits:
-            out_xapk.write(s, os.path.basename(s))
-
-    print("\nSUCCESS! Generated artifacts:")
-    print(f"  1. Standalone Universal APK: {output_standalone_apk} ({os.path.getsize(output_standalone_apk) / (1024*1024):.1f} MB)")
-    print(f"  2. Signed Repacked XAPK:     {output_xapk} ({os.path.getsize(output_xapk) / (1024*1024):.1f} MB)")
+    print(f"Built arm64 APK: {output_standalone_apk}")
 
     # Set GitHub Actions output environment variables if running in CI
     gh_output = os.environ.get("GITHUB_OUTPUT")
@@ -576,7 +526,7 @@ def main():
             f.write(f"tag_name={args.patch_version}\n")
             f.write(f"release_title=hololive Dreams patch {args.patch_version} (game {version_name})\n")
             f.write(f"standalone_apk={output_standalone_apk}\n")
-            f.write(f"repacked_xapk={output_xapk}\n")
+
 
 
 if __name__ == "__main__":
