@@ -78,8 +78,6 @@ jobs:
 
           if os.environ['EVENT_NAME'] == 'schedule':
               latest_tag = next((t for t in release_tags if re.fullmatch(r'[0-9]+(?:\.[0-9]+)*-patched-[1-9][0-9]*', t)), None)
-              if not latest_tag:
-                  latest_tag = next((t for t in release_tags if re.fullmatch(r'0\.[1-9][0-9]*(?:\.[1-9][0-9]*)?-beta', t)), None)
               latest_body = subprocess.check_output(
                   ['gh', 'release', 'view', latest_tag, '--json', 'body', '--jq', '.body'], text=True) if latest_tag else ''
               if f'Game version code: `{game_code}`' in latest_body:
@@ -134,7 +132,8 @@ jobs:
         run: |
           gh release list --json tagName --limit 100 --jq '.[].tagName' | while IFS= read -r tag; do
             if [ "$tag" != "$CURRENT_TAG" ]; then
-              if [[ "$tag" == "v1.2.1-patched" || "$tag" =~ ^0\.[1-9][0-9]*(\.[1-9][0-9]*)?-beta$ || "$tag" =~ ^[0-9]+(\.[0-9]+)*-patched-[0-9]+$ ]]; then
+              # Prune older patch releases ({game ver}-patched-{rev})
+              if [[ "$tag" =~ ^[0-9]+(\.[0-9]+)*-patched-[0-9]+$ ]]; then
                 gh release delete "$tag" --cleanup-tag --yes
               fi
             fi
