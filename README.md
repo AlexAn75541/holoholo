@@ -2,7 +2,7 @@
 
 [![Update & Release](https://github.com/AlexAn75541/holoholo/actions/workflows/patch-and-release.yml/badge.svg)](https://github.com/AlexAn75541/holoholo/actions/workflows/patch-and-release.yml)
 
-Experimental GitHub Actions pipeline for **hololive Dreams** (`game.qualiarts.hololive.dreams.com`). It reads an APKPure XAPK, patches and merges its contents into one signed arm64 APK. The current release predates the CI device-install gate: installation and gameplay remain **unverified**. Read [CONSTRAINTS.md](CONSTRAINTS.md) before changing the release pipeline.
+Experimental GitHub Actions pipeline for **hololive Dreams** (`game.qualiarts.hololive.dreams.com`). It reads an APKPure XAPK, patches and merges its contents into one signed arm64 APK. The existing `0.1-beta` APK is **known broken**: its `resources.arsc` is compressed, which Android rejects for its target SDK. Later builds store that file uncompressed, but a replacement cannot publish until it passes the Android 16 arm64 device gate. Gameplay remains **unverified**. Read [CONSTRAINTS.md](CONSTRAINTS.md) before changing the release pipeline.
 
 ---
 

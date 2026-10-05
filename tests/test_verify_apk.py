@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from scripts.verify_apk import verify
+from scripts.patcher import merge_split_apks
 
 BADGING = "package: name='game.qualiarts.hololive.dreams.com' versionCode='1790677758' versionName='1.2.1'\n"
 SIGNATURE = 'Verified using v2 scheme (APK Signature Scheme v2): true\n'
@@ -24,7 +25,7 @@ class VerifyApkTests(unittest.TestCase):
             'version_name': '1.2.1',
         }))
         with zipfile.ZipFile(self.apk, 'w') as archive:
-            for name in ('AndroidManifest.xml', 'classes.dex',
+            for name in ('AndroidManifest.xml', 'classes.dex', 'resources.arsc',
                          'lib/arm64-v8a/libunity.so', 'assets/aa/Android/game.bundle'):
                 archive.writestr(name, 'sample')
 
@@ -41,6 +42,27 @@ class VerifyApkTests(unittest.TestCase):
         with patch('scripts.verify_apk.shutil.which', return_value='/sdk/tool'), \
              patch('scripts.verify_apk.command', side_effect=output):
             verify(self.apk, self.manifest)
+
+    def test_compressed_resource_table_blocks(self):
+        with zipfile.ZipFile(self.apk, 'w') as archive:
+            for name in ('AndroidManifest.xml', 'classes.dex',
+                         'lib/arm64-v8a/libunity.so', 'assets/aa/Android/game.bundle'):
+                archive.writestr(name, 'sample')
+            archive.writestr('resources.arsc', 'sample', compress_type=zipfile.ZIP_DEFLATED)
+        with patch('scripts.verify_apk.shutil.which', return_value='/sdk/tool'):
+            with self.assertRaisesRegex(ValueError, 'resources.arsc'):
+                verify(self.apk, self.manifest)
+
+    def test_merged_apk_stores_resource_table(self):
+        base = self.root / 'base.apk'
+        output = self.root / 'merged.apk'
+        with zipfile.ZipFile(base, 'w') as archive:
+            archive.writestr('resources.arsc', b'resources', compress_type=zipfile.ZIP_DEFLATED)
+            archive.writestr('AndroidManifest.xml', b'manifest')
+        with patch('scripts.patcher.clean_manifest_for_standalone', side_effect=lambda data: data):
+            merge_split_apks(str(base), [], str(output))
+        with zipfile.ZipFile(output) as archive:
+            self.assertEqual(archive.getinfo('resources.arsc').compress_type, zipfile.ZIP_STORED)
 
     def test_missing_tool_blocks(self):
         with patch('scripts.verify_apk.shutil.which', return_value=None):

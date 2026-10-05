@@ -30,6 +30,8 @@ def verify(apk: Path, source_manifest: Path):
         names = archive.namelist()
         if len(names) != len(set(names)) or 'AndroidManifest.xml' not in names or 'classes.dex' not in names:
             raise ValueError('missing or duplicate APK entry')
+        if 'resources.arsc' not in names or archive.getinfo('resources.arsc').compress_type != zipfile.ZIP_STORED:
+            raise ValueError('resources.arsc must be stored uncompressed for target SDK 30+')
         libs = [name for name in names if name.startswith('lib/') and name.endswith('.so')]
         if not libs or any(not name.startswith('lib/arm64-v8a/') for name in libs):
             raise ValueError('missing or unexpected native architecture')

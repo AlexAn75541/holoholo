@@ -203,7 +203,7 @@ def patch_apk(input_apk_path: str, output_apk_path: str) -> List[str]:
                         all_patched_actions.extend([f"[{item.filename}] {a}" for a in actions])
                         data = bytes(patched_dex)
                 # Store uncompressed for .so and audio/assets if wanted, or standard deflate
-                compress_type = zipfile.ZIP_STORED if item.filename.endswith(".so") else zipfile.ZIP_DEFLATED
+                compress_type = zipfile.ZIP_STORED if item.filename.endswith((".so", "resources.arsc")) else zipfile.ZIP_DEFLATED
                 out_zip.writestr(item.filename, data, compress_type=compress_type)
     if not any('checkLicense: return_void' in action for action in all_patched_actions):
         raise RuntimeError('PairIP checkLicense method not found; refusing unpatched build')
@@ -301,7 +301,7 @@ def merge_split_apks(patched_base_apk: str, split_apk_paths: List[str], output_m
                 if item.filename == "AndroidManifest.xml":
                     print("Cleaning AndroidManifest.xml split requirements for standalone APK...")
                     data = clean_manifest_for_standalone(data)
-                compress_type = zipfile.ZIP_STORED if item.filename.endswith(".so") else item.compress_type
+                compress_type = zipfile.ZIP_STORED if item.filename.endswith((".so", "resources.arsc")) else item.compress_type
                 out_zip.writestr(item.filename, data, compress_type=compress_type)
 
         # 2. Merge entries from split APKs
