@@ -52,8 +52,8 @@ jobs:
               ['gh', 'release', 'list', '--json', 'tagName', '--limit', '100'], text=True))
           release_tags = [r['tagName'] for r in releases]
           tags = subprocess.check_output(['git', 'tag', '--list'], text=True).splitlines()
-          version = '0.2-beta' if '0.2-beta' not in tags else (
-              f"0.2.{max([0] + [int(m.group(1)) for t in tags if (m := re.fullmatch(r'0\.2\.(\d+)-beta', t))]) + 1}-beta")
+          version = '0.3-beta' if '0.3-beta' not in tags else (
+              f"0.3.{max([0] + [int(m.group(1)) for t in tags if (m := re.fullmatch(r'0\.3\.(\d+)-beta', t))]) + 1}-beta")
 
           if os.environ['EVENT_NAME'] == 'schedule':
               _, _, game_code = get_apkpure_download_info()

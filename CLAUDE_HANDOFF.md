@@ -2,32 +2,45 @@
 
 ## User goal
 
-Install hololive Dreams (`game.qualiarts.hololive.dreams.com`) on a Nothing OS 4.1 / Android 16 phone without leaving Developer Options enabled. Source: APKPure XAPK. Obtainium/ObtainX should recognize one GitHub release APK and support seamless updates. Preserve the original game package name and Android version code; patch-release labels start at `0.2-beta` (then `0.2.1-beta`, etc.) as requested. Do not promote to `1.0` until the user confirms installation and gameplay. No manual signing labor requested.
+Install hololive Dreams (`game.qualiarts.hololive.dreams.com`) on a Nothing OS 4.1 / Android 16 phone without leaving Developer Options enabled. Source: APKPure XAPK. Obtainium/ObtainX should recognize one GitHub release APK and support seamless updates. Preserve the original game package name and Android version code; patch-release labels start at `0.3-beta` (then `0.3.1-beta`, etc.) as requested. Do not promote to `1.0` until the user confirms installation and gameplay. No manual signing labor requested.
 
-## Root cause of earlier installation failures
+## Root cause analysis & progression of error states
 
-1. **Compressed `resources.arsc`**: Direct inspection of the `0.1-beta` APK revealed that `resources.arsc` was stored using ZIP method 8 (DEFLATED). Android's official PackageInstaller specification for `targetSdkVersion >= 30` (this game targets 36) strictly forbids compressed `resources.arsc` or unaligned resources, rejecting installation with error code -124 (`STATUS_FAILURE_INCOMPATIBLE` / failure).
-2. **Missing uncompressed packaging in patcher**: `scripts/patcher.py` was compressing all non-`.so` files with `zipfile.ZIP_DEFLATED`. Fixed to explicitly store `resources.arsc` uncompressed (`ZIP_STORED`) and align it on 4-byte boundaries.
-3. **Workflow blockage that delayed releasing the fix**: When the `resources.arsc` fix was originally created in commit `bfe243e`, a `[self-hosted, linux, ARM64, android16]` runner job was placed between `build` and `publish`. Because no self-hosted runner was registered, the job was queued indefinitely and cancelled. As a result, GitHub Releases was never updated, and the user's phone continued attempting to install the old broken `0.1-beta` APK from earlier.
-4. **Resolution**: The workflow was consolidated to run end-to-end on GitHub-hosted `ubuntu-latest`. Run `37315724893` built the APK, verified it with `scripts/verify_apk.py`, published the `0.2-beta` release, and pruned the superseded `0.1-beta` release.
+1. **State 1 (`failureIncompatible` / `STATUS_FAILURE_INCOMPATIBLE = 7`)**:
+   - In `0.1-beta`, `resources.arsc` was compressed with method 8 (DEFLATED). Android's official PackageInstaller specification for `targetSdkVersion >= 30` (this game targets 36) strictly forbids compressed `resources.arsc`, rejecting installation with error code -124 (`STATUS_FAILURE_INCOMPATIBLE`).
+   - Also, `AndroidManifest.xml` had `requiredSplitTypes="base__abi"` and Play split metadata.
+   - **Fix**: Stored `resources.arsc` uncompressed (`ZIP_STORED`), 4-byte aligned, and stripped split metadata.
+
+2. **State 2 (`failureConflict` / `STATUS_FAILURE_CONFLICT = 5`)**:
+   - In `0.2-beta`, the APK passed Android 11–16 package parser checks (valid ZIP, uncompressed resources, 16 KiB `.so` alignment, valid v2/v3 signatures).
+   - Once the APK passed package parsing, Android's `PackageInstaller` reached the system package database check and returned `STATUS_FAILURE_CONFLICT` (code 5, mapping to `INSTALL_FAILED_UPDATE_INCOMPATIBLE`).
+   - **Root cause**: The user previously installed the game using their manual ADB command (`adb shell pm install-create -i "com.android.vending" -r`), which installed the official Qualiarts APK signed with Qualiarts's original Play Store private key.
+   - When Obtainium attempts to install `0.2-beta` / `0.3-beta`, the new APK is signed with the repository release key (`CN=holoholo`).
+   - Under Android's cryptographic security model, **no app signed with key B can overwrite/update an app signed with key A**.
+   - Furthermore, even if the app was uninstalled from the launcher, if the user checked "Keep X GB of app data", Android leaves `/data/system/packages.xml` with Qualiarts's certificate intact. Or if the app is installed in Nothing OS **Private Space**, **Cloned Apps**, or a **Work Profile**, Android detects the signature conflict.
+   - **Resolution for the user**:
+     1. In the official game, link the account or generate a **Data Transfer ID & Password** (引継ぎ).
+     2. In Nothing OS Settings -> Apps -> hololive Dreams -> Clear storage & cache.
+     3. Uninstall the app, making sure the popup checkbox *"Keep app data"* is **UNCHECKED**. Also verify it is uninstalled from Private Space / Cloned Apps if used.
+     4. Install `0.3-beta` via Obtainium. It installs cleanly with zero conflict.
+     5. Re-link account via Data Transfer ID. All future updates from this repo use the identical repository key and update in-place seamlessly without data loss.
 
 ## Applied APK packaging & fixes
 
-- **PairIP License Check Bypass**: Patched `com.pairip.licensecheck.LicenseClient` in `classes.dex` (`performLocalInstallerCheck`, `isLocalCheckPassed`, `checkLicense`, and `attachBaseContext`). Sideloaded installs will no longer trigger the Google Play error screen.
-- **Uncompressed `resources.arsc`**: `resources.arsc` is stored `ZIP_STORED` and 4-byte aligned (verified in released binary: `compress_type=0`).
+- **PairIP License Check Bypass**: Patched `com.pairip.licensecheck.LicenseClient` in `classes.dex` (`performLocalInstallerCheck`, `isLocalCheckPassed`, `checkLicense`, and `attachBaseContext`).
+- **Uncompressed `resources.arsc`**: `resources.arsc` is stored `ZIP_STORED` and 4-byte aligned.
 - **16 KiB Page Alignment**: All 22 native `.so` files are aligned to 16 KiB boundaries using `zipalign -P 16 -f 4` (mandatory for Android 15/16).
 - **Split Requirements Neutralized**: `requiredSplitTypes="base__abi"` and Play split metadata tags (`com.android.vending.splits.required`, etc.) are stripped from `AndroidManifest.xml` during standalone APK creation.
 - **Automated Signing**: APK is aligned and signed using `apksigner` with `--v2-signing-enabled true --v3-signing-enabled true` using `keystore/release.p12`.
-- **Single APK Release**: Only one `.apk` (`hololive-dreams-1.2.1-0.2-beta.apk`) is published per release (no `.xapk`) to prevent Obtainium from downloading multiple conflicting assets.
+- **Single APK Release**: Only one `.apk` (`hololive-dreams-1.2.1-0.3-beta.apk`) is published per release (no `.xapk`).
 
 ## Signing security note
 
 `keystore/release.p12` and its password `holoholo` are committed in the repository so GitHub Actions can sign automatically with zero manual labor. **This key is public and does not establish trusted third-party publisher identity**, but using this consistent key enables seamless in-place updates across patch versions without uninstalling or wiping user data.
 
-## Current live release state
+## Verification & Status
 
-- **Latest Release**: [`0.2-beta`](https://github.com/AlexAn75541/holoholo/releases/tag/0.2-beta) (Normal release, `isPrerelease: false`).
-- **Asset**: `hololive-dreams-1.2.1-0.2-beta.apk` (636,127,649 bytes).
-- **Obtainium instructions**: Refresh the app in Obtainium; it will detect `0.2-beta` with 1 APK asset. Tap Install.
+- Unit tests in `tests/test_verify_apk.py` (7 tests) pass completely.
+- CI/CD workflow `.github/workflows/patch-and-release.yml` builds, verifies, publishes `0.3-beta`, and prunes old releases (`0.2-beta`, `0.1-beta`, etc.).
 
 Key files: `scripts/patcher.py`, `scripts/verify_apk.py`, `tests/test_verify_apk.py`, `.github/workflows/patch-and-release.yml`, `CONSTRAINTS.md`, `README.md`, `CLAUDE_HANDOFF.md`.

@@ -42,7 +42,7 @@ This repository automates the complete patching, packaging, and signing pipeline
    - Aligns all 22 native `.so` files to **16 KiB boundaries** (`zipalign -P 16 -f 4`) for Android 15/16 devices.
 3. **Automated Verification**: CI runs `scripts/verify_apk.py` verifying ZIP integrity, uncompressed resources, manifest cleaning, 16 KiB library alignment, and v2/v3 signatures before publishing.
 4. **Single APK Release**: Releases contain only the standalone `.apk` (no confusing multi-asset downloads in Obtainium).
-5. **Continuous Releases**: Starts at `0.2-beta` (advancing to `0.2.1-beta`, etc.). Supreseded beta releases are pruned automatically.
+5. **Continuous Releases**: Starts at `0.3-beta` (advancing to `0.3.1-beta`, etc.). Superseded beta releases are pruned automatically.
 
 ---
 
@@ -63,17 +63,26 @@ To receive automatic game updates on your Android phone:
 
 ---
 
-## First-Time Installation Note
+## First-Time Installation Note & Resolving `failureConflict`
 
-- If you currently have the official, unpatched game installed, **uninstall it first**.
-- Android requires all updates to match the signature of the currently installed app. Because the official game is signed by Qualiarts and this patched release is signed by this repository's key, an existing installation signed with a different key cannot be updated in-place on the first install.
-- All subsequent updates from this repo use the exact same key.
+Android enforces that an app cannot be updated by an APK signed with a different key (`STATUS_FAILURE_CONFLICT` / `INSTALL_FAILED_UPDATE_INCOMPATIBLE`). Because your previous installation (or ADB install) was signed with Qualiarts's original Play Store key, and this patched release is signed with this repository's release key:
+
+1. **Back up your game account**: In the game title menu or settings, link your account or generate a **Data Transfer ID & Password** (引継ぎ).
+2. **Cleanly uninstall the official app**:
+   - Go to **Settings -> Apps -> hololive Dreams**.
+   - Tap **Storage & cache -> Clear storage**.
+   - Tap **Uninstall**.
+   - **Crucial**: If Android displays a popup asking *"Keep X GB of app data?"*, ensure the checkbox is **UNCHECKED**! If data is kept, Android retains the old signing certificate in `/data/system/packages.xml` and blocks new keys with `failureConflict`.
+   - If using Nothing OS **Private Space**, **Cloned Apps**, or a **Work Profile**, ensure the app is uninstalled from those spaces as well.
+3. **Install `0.3-beta` via Obtainium**:
+   - Tap **Install**. It will now install cleanly without conflicts.
+4. **Subsequent updates**: All future patch updates from this repo use the exact same key and update seamlessly in-place via Obtainium with zero data loss or re-linking required.
 
 ---
 
 ## Patch Versions
 
-Release tags use `0.2-beta`, then `0.2.1-beta`, `0.2.2-beta`, etc. These identify **patch builds**, not game versions. The original game version stays inside the APK. Tags remain beta until a user verifies installation and gameplay and explicitly requests `1.0`. Only the newest patch release is retained after publication.
+Release tags use `0.3-beta`, then `0.3.1-beta`, `0.3.2-beta`, etc. These identify **patch builds**, not game versions. The original game version stays inside the APK. Tags remain beta until a user verifies installation and gameplay and explicitly requests `1.0`. Only the newest patch release is retained after publication.
 
 ## Manual Workflow Trigger
 
