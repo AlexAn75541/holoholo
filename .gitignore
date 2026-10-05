@@ -1,0 +1,9 @@
+dist/
+build/
+*.apk
+*.xapk
+*.dex
+__pycache__/
+*.pyc
+.DS_Store
+Thumbs.db

@@ -1,0 +1,135 @@
+name: Patch and Release Hololive Dreams
+
+on:
+  workflow_dispatch:
+    inputs:
+      xapk_url:
+        description: 'APKPure XAPK Download URL or direct link'
+        required: false
+        default: 'https://d.apkpure.com/b/XAPK/game.qualiarts.hololive.dreams.com?version=latest'
+      force_release:
+        description: 'Force release even if tag already exists'
+        type: boolean
+        default: false
+  schedule:
+    # Run once daily at 04:00 UTC to automatically check for game updates
+    - cron: '0 4 * * *'
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Locate Android Build-Tools (zipalign & apksigner)
+        id: build-tools
+        run: |
+          if [ -d "$ANDROID_HOME/build-tools" ]; then
+            BT_DIR=$(ls -d $ANDROID_HOME/build-tools/* | sort -V | tail -n 1)
+            echo "Found Android build-tools at $BT_DIR"
+            echo "$BT_DIR" >> $GITHUB_PATH
+          else
+            echo "Warning: ANDROID_HOME/build-tools not found"
+          fi
+
+      - name: Check version against existing releases
+        id: check-version
+        run: |
+          INPUT_URL="${{ github.event.inputs.xapk_url || 'https://d.apkpure.com/b/XAPK/game.qualiarts.hololive.dreams.com?version=latest' }}"
+          FORCE="${{ github.event.inputs.force_release || 'false' }}"
+
+          python3 -c "
+          import urllib.request, urllib.parse, re, subprocess, sys, os
+
+          url = '$INPUT_URL'
+          force = '$FORCE'.lower() == 'true'
+
+          try:
+              req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'})
+              with urllib.request.urlopen(req) as resp:
+                  final_url = resp.geturl()
+              m = re.search(r'filename=([^&]+)', final_url)
+              if m:
+                  fn = urllib.parse.unquote_plus(m.group(1))
+                  vm = re.search(r'[\-_v]([0-9]+(?:\.[0-9]+)+)', fn)
+                  if vm:
+                      ver = vm.group(1)
+                      tag = f'v{ver}-patched'
+                      print(f'Latest remote version: {ver} (Tag: {tag})')
+                      # Check if git tag exists
+                      tags = subprocess.check_output(['git', 'tag', '-l', tag], text=True).strip()
+                      if tags and not force:
+                          print(f'Tag {tag} already released. Skipping build.')
+                          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+                              f.write('skip=true\n')
+                          sys.exit(0)
+          except Exception as e:
+              print(f'Note: Version pre-check returned {e}, proceeding with full download.')
+
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+              f.write('skip=false\n')
+          "
+
+      - name: Run Hololive Dreams Patcher
+        if: steps.check-version.outputs.skip != 'true'
+        id: patch
+        run: |
+          INPUT_URL="${{ github.event.inputs.xapk_url || 'https://d.apkpure.com/b/XAPK/game.qualiarts.hololive.dreams.com?version=latest' }}"
+          python3 scripts/patcher.py \
+            --input "$INPUT_URL" \
+            --keystore keystore/release.p12 \
+            --keystore-pass holoholo \
+            --keystore-alias release \
+            --dist-dir dist
+
+      - name: Publish GitHub Release
+        if: steps.check-version.outputs.skip != 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.patch.outputs.tag_name }}
+          name: ${{ steps.patch.outputs.release_title }}
+          draft: false
+          prerelease: false
+          files: |
+            ${{ steps.patch.outputs.standalone_apk }}
+            ${{ steps.patch.outputs.repacked_xapk }}
+          body: |
+            ### hololive Dreams ${{ steps.patch.outputs.version_name }} (Patched)
+
+            Automated build for **game.qualiarts.hololive.dreams.com** (Version code: `${{ steps.patch.outputs.version_code }}`).
+
+            #### Applied Patches
+            - **Google Play Installer & Licensing Bypass**: Patched PairIP check in `classes.dex` (`performLocalInstallerCheck`, `isLocalCheckPassed`, `checkLicense`, and `attachBaseContext`).
+            - Sideloaded installs will no longer display the Google Play error screen.
+            - Both APKs are signed with the permanent repository release key.
+
+            #### Available Downloads
+            1. **`hololive-dreams-${{ steps.patch.outputs.version_name }}-patched.apk`**
+               - Standalone Universal APK (merged base + arm64_v8a native libs + asset pack).
+               - Recommended for standard package installers & Obtainium.
+            2. **`hololive-dreams-${{ steps.patch.outputs.version_name }}-patched.xapk`**
+               - Signed XAPK containing all split APKs and original manifest.
+
+            #### Installation Notice
+            - **First-time Install**: If you currently have the official unpatched game installed, uninstall it first because the signing certificate is changed from Qualiarts's private key to this repo's key.
+            - **Subsequent Updates**: Future releases from this repo use the exact same key and can be updated seamlessly via Obtainium without uninstalling or wiping data.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
