@@ -114,3 +114,5 @@ If the app does not show up in the Game Dashboard list:
 ## Disclaimer
 
 This project is an unofficial community tool created for personal backup, regional accessibility, and automation purposes. All game assets, names, and trademarks belong to COVER Corp. and QualiArts, Inc.
+
+I'm creating this repo for the sole purpose of playing hololive dream wthout having to deal with xapk manual sideloading, and i'm not gonna advertise this shit because people will find it eventually.
