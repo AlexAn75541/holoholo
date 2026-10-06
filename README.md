@@ -4,7 +4,7 @@ Automated GitHub Actions pipeline for **hololive Dreams** (`game.qualiarts.holol
 
 > [!WARNING]
 > **ONLY LOGIN WITH ID AND PASSWORD. GOOGLE SIGN IN NOT SUPPORTED.**
-> If you wanted to have Google Sign in for whatever reasons, just go to [method B](https://github.com/AlexAn75541/holoholo/edit/main/README.md#method-b-adb-sideload-with-google-play-attribution-you-can-use-this-instead-of-the-apk-in-this-repo-if-you-still-wanted-to-have-google-sign-in).
+> If you wanted to have Google Sign in for whatever reasons, just go to [method B](https://github.com/AlexAn75541/holoholo#method-b-adb-sideload-with-google-play-attribution-you-can-use-this-instead-of-the-apk-in-this-repo-if-you-still-wanted-to-have-google-sign-in)
 
 [![Update & Release](https://github.com/AlexAn75541/holoholo/actions/workflows/patch-and-release.yml/badge.svg)](https://github.com/AlexAn75541/holoholo/actions/workflows/patch-and-release.yml)
 
