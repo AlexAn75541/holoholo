@@ -1,0 +1,67 @@
+name: Manual Force Rebuild & Artifact
+
+on:
+  workflow_dispatch:
+    inputs:
+      xapk_url:
+        description: 'Optional direct XAPK URL (blank uses APKPure)'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-artifact:
+    name: Force build and upload APK artifact
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Locate Android SDK build tools
+        run: |
+          BT_DIR=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)
+          for tool in zipalign apksigner aapt; do test -x "$BT_DIR/$tool"; done
+          echo "$BT_DIR" >> "$GITHUB_PATH"
+
+      - name: Fetch source XAPK
+        id: fetch
+        env:
+          XAPK_URL: ${{ inputs.xapk_url }}
+        run: |
+          python3 scripts/check_and_fetch.py --output-xapk source.xapk --force
+
+      - name: Run verifier self-checks
+        run: PYTHONPATH=. python3 tests/test_verify_apk.py
+
+      - name: Build signed arm64 APK
+        id: patch
+        env:
+          PATCH_VERSION: ${{ steps.fetch.outputs.patch_version }}
+        run: |
+          python3 scripts/patcher.py --input source.xapk --patch-version "$PATCH_VERSION" \
+            --keystore keystore/release.p12 --dist-dir dist
+
+      - name: Verify standalone APK
+        run: |
+          apk=(dist/*.apk)
+          test "${#apk[@]}" -eq 1
+          python3 scripts/verify_apk.py "${apk[0]}" dist/work/extracted/manifest.json
+
+      - name: Upload patched APK as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: hololive-dreams-patched-apk
+          path: dist/*.apk
+          retention-days: 14

@@ -1,5 +1,8 @@
 # hololive Dreams Auto-Patcher & Updater
 
+> [!WARNING]
+> **ONLY LOGIN WITH ID AND PASSWORD. GOOGLE SIGN IN NOT SUPPORTED.**
+
 [![Update & Release](https://github.com/AlexAn75541/holoholo/actions/workflows/patch-and-release.yml/badge.svg)](https://github.com/AlexAn75541/holoholo/actions/workflows/patch-and-release.yml)
 
 Automated GitHub Actions pipeline for **hololive Dreams** (`game.qualiarts.hololive.dreams.com`). It fetches the official APKPure XAPK, patches the Google Play licensing/installer lock (PairIP), properly packages and signs a standalone arm64 APK, and publishes releases for auto-updating via **Obtainium**.
