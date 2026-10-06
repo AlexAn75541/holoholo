@@ -1,54 +1,23 @@
-# hololive Dreams Auto-Patcher & Updater
+# holoholo 
+
+Automated GitHub Actions pipeline for **hololive Dreams** (`game.qualiarts.hololive.dreams.com`). It fetches the official APKPure XAPK, patches the Google Play licensing/installer lock (PairIP), properly packages and signs a standalone arm64 APK, and publishes apks to releases.
 
 > [!WARNING]
 > **ONLY LOGIN WITH ID AND PASSWORD. GOOGLE SIGN IN NOT SUPPORTED.**
+> If you wanted to have Google Sign in for whatever reasons, just go to [method B](https://github.com/AlexAn75541/holoholo/edit/main/README.md#method-b-adb-sideload-with-google-play-attribution-you-can-use-this-instead-of-the-apk-in-this-repo-if-you-still-wanted-to-have-google-sign-in).
 
 [![Update & Release](https://github.com/AlexAn75541/holoholo/actions/workflows/patch-and-release.yml/badge.svg)](https://github.com/AlexAn75541/holoholo/actions/workflows/patch-and-release.yml)
 
-Automated GitHub Actions pipeline for **hololive Dreams** (`game.qualiarts.hololive.dreams.com`). It fetches the official APKPure XAPK, patches the Google Play licensing/installer lock (PairIP), properly packages and signs a standalone arm64 APK, and publishes releases for auto-updating via **Obtainium**.
+
+# Methods to actually install da game
 
 ---
 
-## Sideloading vs. Account Linking / Google Login: The Reality
+## Method A: just use Obtainium/ObtainX for the apks in this repo or APKPure
 
-When sideloading this game, there are two distinct installation paths depending on your priorities:
+## Method B: ADB Sideload with Google Play Attribution (You can use this instead of the apk in this repo, if you still wanted to have google sign in)
 
-| Feature / Goal | Method A: Sideload Patched APK (Obtainium) | Method B: ADB Install as Google Play (`-i com.android.vending`) |
-| :--- | :--- | :--- |
-| **Google Account Linking** | ❌ Fails (Google OAuth server checks SHA-256 fingerprint) | ✅ Works (Uses official Play Store signature) |
-| **In-Game Data Transfer ID (引継ぎ)** | ✅ Works completely | ✅ Works completely |
-| **Google / OEM Game Dashboard & 120 FPS** | ⚠️ Generic profile unless set in OS Display settings | ✅ Works natively (installer attributed to Play Store) |
-| **Developer Options / USB Debugging Required** | ❌ **No** (Safe for banking apps) | ⚠️ **Yes** (During initial install & updates) |
-| **Update Process** | Seamless 1-tap in Obtainium | Connect USB, enable ADB, run shell commands |
-
-> **Why Google Login / Play Games fails on any patched APK:**
-> Google's OAuth 2.0 servers verify client requests by checking the cryptographic SHA-256 certificate fingerprint of the running app against Google Cloud Console. Qualiarts's server only authorizes Google's official App Signing Key (`db:f5:a4:...`). Any modified or re-signed APK has a different signature, so Google's backend unconditionally rejects Google Sign-In with an OAuth mismatch (`10: DEVELOPER_ERROR`).
->
-> **Recommended Solution:** Use the publisher's built-in **Data Transfer ID & Password (データ引継ぎ)** system under the game's menu. It works identically across all devices and clients without relying on Google servers.
-
----
-
-## Method A: Clean Obtainium Setup (No Developer Options)
-
-Use this method if banking apps or security profiles prohibit keeping Developer Options enabled.
-
-### First-Time Installation
-1. If you previously had the official app installed, back up your account with a **Data Transfer ID & Password** (引継ぎ) first.
-2. Cleanly uninstall the existing app:
-   - Go to **Settings -> Apps -> hololive Dreams**.
-   - Tap **Storage & cache -> Clear storage**.
-   - Tap **Uninstall**. Ensure the popup checkbox *"Keep app data"* is **UNCHECKED** (prevents `failureConflict`).
-3. In **Obtainium**, tap **Add App**:
-   - URL: `https://github.com/AlexAn75541/holoholo`
-   - Filter regular expression: `.*\.apk$`
-4. Tap **Add**, then tap **Install**.
-5. Open the game and restore your account using your Data Transfer ID. Future updates from Obtainium will update in-place without data loss.
-
----
-
-## Method B: ADB Sideload with Google Play Attribution
-
-This method installs the **unmodified official split APKs** while setting Google Play (`com.android.vending`) as the installer. This bypasses the Google Play licensing check without patching the binary, allowing **official Google Account login** and **Game Dashboard / 120 FPS** to work.
+This method installs the **unmodified official split APKs** while setting Google Play (`com.android.vending`) as the installer. This bypasses the Google Play licensing check without patching the binary, allowing **official Google Account login** to work.
 
 ### Initial Installation via ADB
 
@@ -67,7 +36,7 @@ This method installs the **unmodified official split APKs** while setting Google
    ```bash
    adb shell pm install-create -i "com.android.vending" -r
    ```
-   *(This outputs a session ID, e.g. `Success: created install session [12345678]`)*
+   *(This outputs a session ID that you have to note it down for the next 3 commands, e.g. `Success: created install session [12345678]`)*
 5. Stage the APKs into the session:
    ```bash
    adb shell pm install-write 12345678 base.apk /data/local/tmp/base.apk
@@ -79,7 +48,7 @@ This method installs the **unmodified official split APKs** while setting Google
    adb shell pm install-commit 12345678
    adb shell rm /data/local/tmp/*.apk
    ```
-7. *(Optional)* Turn off Developer Options once installed if required by banking apps.
+7. *(Optional)* Turn off Developer Options once installed if required by security-aware apps like banking apps and shit.
 
 ---
 
@@ -115,7 +84,7 @@ When a new game version is released, you can update without losing any save data
 
 ---
 
-## Unlocking 120 FPS / Game Dashboard
+# Unlocking 120 FPS / Game Dashboard
 
 **Package ID:** `game.qualiarts.hololive.dreams.com`  
 **App List Name:** `hololive Dreams` (or `ホロライブドリームス`)
