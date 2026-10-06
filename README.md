@@ -117,7 +117,7 @@ When a new game version is released, you can update without losing any save data
 **Package ID:** `game.qualiarts.hololive.dreams.com`  
 **App List Name:** `hololive Dreams` (or `ホロライブドリームス`)
 
-### Option 1: Nothing OS GUI
+### Option 1: Game Dashboard overlay
 1. Open **Settings -> Special features -> Game Mode / Game Dashboard**.
 2. Tap **Add Apps** and ensure `hololive Dreams` (`game.qualiarts.hololive.dreams.com`) is enabled.
 3. Open **Settings -> Display -> Refresh rate** -> set to **High (120 Hz)**.
