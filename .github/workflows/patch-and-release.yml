@@ -1,4 +1,4 @@
-name: Patch and Release Hololive Dreams
+name: Check, Patch and Release Hololive Dreams
 
 on:
   workflow_dispatch:
@@ -7,6 +7,10 @@ on:
         description: 'Optional direct XAPK URL (blank uses APKPure)'
         required: false
         default: ''
+      force_build:
+        description: 'Force build even if game version has not changed'
+        type: boolean
+        default: false
   schedule:
     - cron: '0 4 * * *'
   push:
@@ -20,121 +24,110 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  patch-and-release:
+  check-and-fetch:
+    name: Fetch and check APK version
+    runs-on: ubuntu-latest
+    outputs:
+      should_build: ${{ steps.check.outputs.should_build }}
+      game_version: ${{ steps.check.outputs.game_version }}
+      game_code: ${{ steps.check.outputs.game_code }}
+      patch_version: ${{ steps.check.outputs.patch_version }}
+      xapk_path: ${{ steps.check.outputs.xapk_path }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Locate Android SDK build tools
+        run: |
+          BT_DIR=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)
+          test -x "$BT_DIR/aapt"
+          echo "$BT_DIR" >> "$GITHUB_PATH"
+
+      - name: Check version and download source XAPK
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          XAPK_URL: ${{ inputs.xapk_url }}
+          FORCE_BUILD: ${{ inputs.force_build }}
+        run: |
+          python3 scripts/check_and_fetch.py --output-xapk source.xapk
+
+      - name: Upload source XAPK artifact
+        if: steps.check.outputs.should_build == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: source-xapk
+          path: source.xapk
+          retention-days: 1
+
+  build-and-release:
+    name: Build, verify and publish APK
+    needs: check-and-fetch
+    if: needs.check-and-fetch.outputs.should_build == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
+
       - name: Locate Android SDK build tools
         run: |
           BT_DIR=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)
           for tool in zipalign apksigner aapt; do test -x "$BT_DIR/$tool"; done
           echo "$BT_DIR" >> "$GITHUB_PATH"
-      - name: Fetch source XAPK
-        env:
-          XAPK_URL: ${{ inputs.xapk_url }}
-        run: |
-          python3 - <<'PY'
-          import os
-          from scripts.patcher import DEFAULT_PACKAGE, download_file, get_apkpure_download_info
 
-          xapk_url = os.environ.get('XAPK_URL', '').strip()
-          if not xapk_url:
-              print('Querying APKPure for source XAPK...')
-              xapk_url, _, _ = get_apkpure_download_info(DEFAULT_PACKAGE)
-          print(f'Downloading source XAPK from {xapk_url}...')
-          download_file(xapk_url, 'source.xapk')
-          PY
-      - name: Decompile APK and infer patch version
-        id: version
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          python3 - <<'PY'
-          import json, os, re, subprocess
-          from scripts.patcher import inspect_apk_version
+      - name: Download source XAPK artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: source-xapk
 
-          pkg_name, game_ver, game_code = inspect_apk_version('source.xapk')
-          print(f'APK inspection: {pkg_name} {game_ver} (code: {game_code})')
-
-          releases = json.loads(subprocess.check_output(
-              ['gh', 'release', 'list', '--json', 'tagName', '--limit', '100'], text=True))
-          release_tags = [r['tagName'] for r in releases]
-          tags = subprocess.check_output(['git', 'tag', '--list'], text=True).splitlines()
-
-          all_tags = set(tags + release_tags)
-          pattern = rf'^{re.escape(game_ver)}-patched-(\d+)$'
-          revs = [int(m.group(1)) for t in all_tags if (m := re.fullmatch(pattern, t))]
-          version = f"{game_ver}-patched-{max([0] + revs) + 1}"
-
-          if os.environ['EVENT_NAME'] == 'schedule':
-              latest_tag = next((t for t in release_tags if re.fullmatch(r'[0-9]+(?:\.[0-9]+)*-patched-[1-9][0-9]*', t)), None)
-              latest_body = subprocess.check_output(
-                  ['gh', 'release', 'view', latest_tag, '--json', 'body', '--jq', '.body'], text=True) if latest_tag else ''
-              if f'Game version code: `{game_code}`' in latest_body:
-                  print('No upstream game update; skipping scheduled build.')
-                  with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
-                      f.write('skip=true\n')
-                  raise SystemExit(0)
-
-          print(f'Inferred patch version: {version}')
-          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
-              f.write(f'patch_version={version}\n')
-              f.write('skip=false\n')
-          PY
       - name: Run verifier self-checks
-        if: steps.version.outputs.skip != 'true'
         run: PYTHONPATH=. python3 tests/test_verify_apk.py
+
       - name: Build signed arm64 APK
-        if: steps.version.outputs.skip != 'true'
         id: patch
         env:
-          PATCH_VERSION: ${{ steps.version.outputs.patch_version }}
+          PATCH_VERSION: ${{ needs.check-and-fetch.outputs.patch_version }}
         run: |
           python3 scripts/patcher.py --input source.xapk --patch-version "$PATCH_VERSION" \
             --keystore keystore/release.p12 --dist-dir dist
+
       - name: Verify standalone APK
-        if: steps.version.outputs.skip != 'true'
         run: |
           apk=(dist/*.apk)
           test "${#apk[@]}" -eq 1
           python3 scripts/verify_apk.py "${apk[0]}" dist/work/extracted/manifest.json
+
       - name: Publish release
-        if: steps.version.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
+          APK: ${{ steps.patch.outputs.standalone_apk }}
           TAG: ${{ steps.patch.outputs.tag_name }}
           TITLE: ${{ steps.patch.outputs.release_title }}
           GAME_VERSION: ${{ steps.patch.outputs.version_name }}
           GAME_CODE: ${{ steps.patch.outputs.version_code }}
         run: |
-          set -euo pipefail
-          apk=(dist/*.apk)
-          test "${#apk[@]}" -eq 1
-          gh release create "$TAG" "${apk[0]}" --title "$TITLE" \
-            --notes "Patch build $TAG. Game version: $GAME_VERSION. Game version code: \`$GAME_CODE\`. Contains standalone arm64 APK with uncompressed resources.arsc (4-byte aligned), 16KiB page alignment, and v2/v3 signatures. Upstream package version remains intact."
+          python3 scripts/publish_release.py --apk "$APK" --tag "$TAG" --title "$TITLE" \
+            --game-version "$GAME_VERSION" --game-code "$GAME_CODE"
+
       - name: Prune superseded patch releases
-        if: steps.version.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
           CURRENT_TAG: ${{ steps.patch.outputs.tag_name }}
         run: |
-          gh release list --json tagName --limit 100 --jq '.[].tagName' | while IFS= read -r tag; do
-            if [ "$tag" != "$CURRENT_TAG" ]; then
-              # Prune older patch releases ({game ver}-patched-{rev})
-              if [[ "$tag" =~ ^[0-9]+(\.[0-9]+)*-patched-[0-9]+$ ]]; then
-                gh release delete "$tag" --cleanup-tag --yes
-              fi
-            fi
-          done
+          python3 scripts/prune_releases.py --current-tag "$CURRENT_TAG"

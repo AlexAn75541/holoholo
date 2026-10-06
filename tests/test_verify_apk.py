@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 from scripts.verify_apk import verify
 from scripts.patcher import merge_split_apks, resolve_patch_version, inspect_apk_version
+from scripts.check_and_fetch import parse_version_tuple, compute_next_patch_version, get_latest_patched_game_version
 
 BADGING = "package: name='game.qualiarts.hololive.dreams.com' versionCode='1790677758' versionName='1.2.1'\n"
 SIGNATURE = 'Verified using v3 scheme (APK Signature Scheme v3): true\n'
@@ -107,6 +108,17 @@ class VerifyApkTests(unittest.TestCase):
             self.assertEqual(pkg, 'game.qualiarts.hololive.dreams.com')
             self.assertEqual(ver, '1.2.1')
             self.assertEqual(code, '1790677758')
+
+    def test_check_and_fetch_version_logic(self):
+        self.assertEqual(parse_version_tuple('1.2.1'), (1, 2, 1))
+        self.assertEqual(parse_version_tuple('1.2.10'), (1, 2, 10))
+        self.assertTrue(parse_version_tuple('1.2.2') > parse_version_tuple('1.2.1'))
+        self.assertTrue(parse_version_tuple('1.3.0') > parse_version_tuple('1.2.9'))
+
+        tags = ['1.2.1-patched-1', '1.2.1-patched-2']
+        self.assertEqual(get_latest_patched_game_version(tags), '1.2.1')
+        self.assertEqual(compute_next_patch_version('1.2.1', tags), '1.2.1-patched-3')
+        self.assertEqual(compute_next_patch_version('1.2.2', tags), '1.2.2-patched-1')
 
 
 if __name__ == '__main__':
