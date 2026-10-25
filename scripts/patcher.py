@@ -568,7 +568,7 @@ def main():
 
     # Cosmetic names
     patch_ver = resolve_patch_version(args.patch_version, version_name)
-    cosmetic_base = f"hololive-dreams-{patch_ver}"
+    cosmetic_base = f"the_apk_{patch_ver}"
     output_standalone_apk = os.path.join(args.dist_dir, f"{cosmetic_base}.apk")
 
     # Sign standalone APK
@@ -591,7 +591,7 @@ def main():
             f.write(f"version_name={version_name}\n")
             f.write(f"version_code={version_code}\n")
             f.write(f"tag_name={patch_ver}\n")
-            f.write(f"release_title=hololive Dreams {patch_ver}\n")
+            f.write(f"release_title=the_apk {patch_ver}\n")
             f.write(f"standalone_apk={output_standalone_apk}\n")
 
 
